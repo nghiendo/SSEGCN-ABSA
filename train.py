@@ -24,6 +24,7 @@ except ImportError:
 
 from models.ssegcn import SSEGCNClassifier
 from models.ssegcn_bert import SSEGCNBertClassifier
+from models.sg_mbsc_absa import SGMBSCClassifier, SGMBSCBertClassifier
 from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData
 from prepare_vocab import VocabHelp
 
@@ -171,12 +172,14 @@ class Instructor:
                 self.model.train()
                 optimizer.zero_grad()
                 inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
-                outputs, penal = self.model(inputs)
                 targets = sample_batched['polarity'].to(self.opt.device)
-                if self.opt.losstype is not None:
-                    loss = criterion(outputs, targets) + penal
+                if getattr(self.model, 'supports_contrastive', False):
+                    outputs, penal = self.model(inputs, targets)
                 else:
-                    loss = criterion(outputs, targets)
+                    outputs, penal = self.model(inputs)
+                loss = criterion(outputs, targets)
+                if penal is not None:
+                    loss = loss + penal
 
                 loss.backward()
                 optimizer.step()
@@ -261,8 +264,15 @@ class Instructor:
 
 def main():
     model_classes = {
-        'ssegcn': SSEGCNClassifier,
-        'ssegcnbert': SSEGCNBertClassifier,
+        'ssegcn': SGMBSCClassifier,
+        'ssegcnbert': SGMBSCBertClassifier,
+        'ssegcn_bert': SGMBSCBertClassifier,
+        'sgmbsc': SGMBSCClassifier,
+        'sgmbscbert': SGMBSCBertClassifier,
+        'sgmbsc_bert': SGMBSCBertClassifier,
+        'ssegcn_original': SSEGCNClassifier,
+        'ssegcnbert_original': SSEGCNBertClassifier,
+        'ssegcn_bert_original': SSEGCNBertClassifier,
 
     }
     
@@ -284,7 +294,14 @@ def main():
     input_colses = {
  
         'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
+        'sgmbsc': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
+        'ssegcn_original': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
+        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'ssegcn_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'sgmbscbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'sgmbsc_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'ssegcnbert_original': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'ssegcn_bert_original': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
     }
     
     initializers = {
@@ -305,7 +322,7 @@ def main():
     
     # Hyperparameters
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', default='ssegcn', type=str, help=', '.join(model_classes.keys()))
+    parser.add_argument('--model_name', default='sgmbsc', type=str, help=', '.join(model_classes.keys()))
     parser.add_argument('--dataset', default='laptop', type=str, help=', '.join(dataset_files.keys()))
     parser.add_argument('--optimizer', default='adam', type=str, help=', '.join(optimizers.keys()))
     parser.add_argument('--initializer', default='xavier_uniform_', type=str, help=', '.join(initializers.keys()))
@@ -345,6 +362,11 @@ def main():
     parser.add_argument('--losstype', default=None, type=str, help="['doubleloss', 'orthogonalloss', 'differentiatedloss']")
     parser.add_argument('--alpha', default=0.25, type=float)
     parser.add_argument('--beta', default=0.25, type=float)
+    parser.add_argument('--sg_expert_dim', default=0, type=int, help='SG-MBSC branch dimension; 0 keeps encoder dimension.')
+    parser.add_argument('--sg_temperature', default=0.2, type=float, help='Temperature for SG-MBSC sentiment contrastive loss.')
+    parser.add_argument('--sg_cl_weight', default=0.1, type=float, help='Weight for SG-MBSC sentiment contrastive loss.')
+    parser.add_argument('--sg_dropout', default=0.2, type=float, help='Dropout before SG-MBSC final classifier.')
+    parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for original SSEGCN aspect-pooling residual logits.')
     
     # * pretrained language model
     parser.add_argument('--pretrained_bert_name', default='albert-base-v2', type=str)
