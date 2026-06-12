@@ -255,8 +255,11 @@ neutral  -> 2
 ## 5. SG-MBSC-ABSA Extension
 
 The SG-MBSC models keep the existing encoders and replace the single pooled
-classifier head with a shared-group multi-branch sentiment head. They also keep
-the original aspect-pooling representation as a residual classifier path.
+classifier head with one shared/general branch plus three sentiment-specific
+expert branches. The shared branch is trained with standard cross-entropy, while
+the positive/neutral/negative expert branches are regularized with a
+prototype-style contrastive objective. The original aspect-pooling
+representation is also kept as a residual classifier path.
 
 ```text
 +------------------------------+
@@ -288,28 +291,26 @@ the original aspect-pooling representation as a residual classifier path.
 +----------------------------------------------------+
 | Cross-talk gating                                  |
 |                                                    |
-| Shared -> experts:                                 |
+| Shared/general -> experts:                         |
 |   v_pos + v_shared -> gated positive vector        |
 |   v_neu + v_shared -> gated neutral vector         |
 |   v_neg + v_shared -> gated negative vector        |
-|                                                    |
-| Experts -> shared:                                 |
-|   v_pos + v_neu + v_neg -> shared feedback         |
 +---------------------------+------------------------+
                             |
               +-------------+-------------+
               |                           |
               v                           v
 +---------------------------+   +---------------------------+
-| Fusion classifier         |   | Contrastive objective     |
-| concat all gated vectors  |   | shared vector as anchor   |
-| -> logits                 |   | target branch from label  |
+| Unified classifier        |   | Expert contrastive loss   |
+| shared logits             |   | selected sentiment expert |
+| + expert fusion logits    |   | vs learned class prototype|
+| + residual base logits    |   | target branch from label  |
 +-------------+-------------+   +-------------+-------------+
               |                           |
               v                           |
 +---------------------------+             |
-| Original SSEGCN residual  |             |
-| aspect pooling -> logits  |             |
+| Shared branch CE          |             |
+| standard supervised loss  |             |
 +-------------+-------------+             |
               |                           |
               +-------------+-------------+
@@ -317,7 +318,9 @@ the original aspect-pooling representation as a residual classifier path.
                             v
 +----------------------------------------------------+
 | Training loss                                       |
-| CE(fused logits, label) + sg_cl_weight * InfoNCE    |
+| CE(final logits, label)                             |
+| + sg_shared_ce_weight * CE(shared logits, label)    |
+| + sg_cl_weight * expert prototype contrastive loss  |
 +----------------------------------------------------+
 ```
 
@@ -387,6 +390,8 @@ python train.py --model_name ssegcn_bert_original --dataset laptop --pretrained_
 --sg_cl_weight      Weight of the contrastive loss term.
 --sg_dropout        Dropout before the final fusion classifier.
 --sg_base_weight    Weight of the original SSEGCN residual logits.
+--sg_shared_ce_weight
+                    Auxiliary CE weight for the shared/general branch.
 ```
 
 ## 8. Code Ownership Map

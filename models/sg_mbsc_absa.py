@@ -7,7 +7,7 @@ from models.ssegcn_bert import GCNBert
 
 
 class SGMBSCHead(nn.Module):
-    """Shared-group multi-branch sentiment head with optional InfoNCE loss."""
+    """Shared/general branch plus sentiment-specific expert branches."""
 
     def __init__(self, input_dim, opt):
         super().__init__()
@@ -17,7 +17,9 @@ class SGMBSCHead(nn.Module):
         self.temperature = opt.sg_temperature
         self.cl_weight = opt.sg_cl_weight
         self.base_weight = opt.sg_base_weight
-        self.branch_names = ("pos", "neu", "neg", "shared")
+        self.shared_ce_weight = getattr(opt, "sg_shared_ce_weight", 0.5)
+        self.expert_names = ("pos", "neu", "neg")
+        self.branch_names = self.expert_names + ("shared",)
 
         self.projections = nn.ModuleDict({
             name: nn.Linear(input_dim, self.expert_dim)
@@ -31,10 +33,12 @@ class SGMBSCHead(nn.Module):
             name: nn.Linear(self.expert_dim * 2, self.expert_dim)
             for name in ("pos", "neu", "neg")
         })
-        self.shared_feedback = nn.Linear(self.expert_dim * 3, self.expert_dim)
         self.dropout = nn.Dropout(opt.sg_dropout)
-        self.classifier = nn.Linear(self.expert_dim * 4, opt.polarities_dim)
+        self.expert_classifier = nn.Linear(self.expert_dim * 3, opt.polarities_dim)
+        self.shared_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
         self.base_classifier = nn.Linear(input_dim, opt.polarities_dim)
+        self.class_prototypes = nn.Parameter(torch.empty(len(self.expert_names), self.expert_dim))
+        nn.init.xavier_uniform_(self.class_prototypes)
 
     def _masked_attention_pool(self, hidden, mask, branch):
         scores = self.attentions[branch](hidden).squeeze(-1)
@@ -52,32 +56,38 @@ class SGMBSCHead(nn.Module):
             branch_hidden = F.relu(self.projections[branch](sequence_outputs))
             pooled[branch] = self._masked_attention_pool(branch_hidden, sequence_mask, branch)
 
-        shared_context = pooled["shared"]
+        shared_representation = pooled["shared"]
         gated = {}
-        for branch in ("pos", "neu", "neg"):
-            gate = torch.sigmoid(self.gates[branch](torch.cat([pooled[branch], shared_context], dim=-1)))
-            gated[branch] = gate * pooled[branch] + (1.0 - gate) * shared_context
+        for branch in self.expert_names:
+            gate = torch.sigmoid(self.gates[branch](torch.cat([pooled[branch], shared_representation], dim=-1)))
+            gated[branch] = gate * pooled[branch] + (1.0 - gate) * shared_representation
 
-        expert_feedback = torch.cat([pooled["pos"], pooled["neu"], pooled["neg"]], dim=-1)
-        gated["shared"] = shared_context + torch.tanh(self.shared_feedback(expert_feedback))
-
-        fusion = torch.cat([gated["pos"], gated["neu"], gated["neg"], gated["shared"]], dim=-1)
-        logits = self.classifier(self.dropout(fusion))
+        expert_fusion = torch.cat([gated["pos"], gated["neu"], gated["neg"]], dim=-1)
+        expert_logits = self.expert_classifier(self.dropout(expert_fusion))
+        shared_logits = self.shared_classifier(self.dropout(shared_representation))
+        logits = shared_logits + expert_logits
         if base_representation is not None and self.base_weight > 0:
             logits = logits + self.base_weight * self.base_classifier(base_representation)
-        cl_loss = self._contrastive_loss(gated, labels) if labels is not None else None
-        return logits, cl_loss
+        aux_loss = self._auxiliary_loss(gated, shared_logits, labels) if labels is not None else None
+        return logits, aux_loss
+
+    def _auxiliary_loss(self, gated, shared_logits, labels):
+        loss = self.shared_ce_weight * F.cross_entropy(shared_logits, labels)
+        if self.cl_weight > 0:
+            loss = loss + self._contrastive_loss(gated, labels)
+        return loss
 
     def _contrastive_loss(self, gated, labels):
         branch_vectors = torch.stack([gated["pos"], gated["neu"], gated["neg"]], dim=1)
-        anchor = F.normalize(gated["shared"], p=2, dim=-1).unsqueeze(1)
         branch_vectors = F.normalize(branch_vectors, p=2, dim=-1)
-        similarities = torch.sum(anchor * branch_vectors, dim=-1) / self.temperature
 
         # Dataset labels: positive=0, negative=1, neutral=2.
         # Branch order above: positive=0, neutral=1, negative=2.
         label_to_branch = torch.tensor([0, 2, 1], dtype=torch.long, device=labels.device)
         branch_targets = label_to_branch[labels]
+        selected_experts = branch_vectors[torch.arange(labels.size(0), device=labels.device), branch_targets]
+        prototypes = F.normalize(self.class_prototypes, p=2, dim=-1)
+        similarities = torch.matmul(selected_experts, prototypes.transpose(0, 1)) / self.temperature
         return self.cl_weight * F.cross_entropy(similarities, branch_targets)
 
 

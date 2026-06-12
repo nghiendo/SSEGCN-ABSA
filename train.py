@@ -367,6 +367,7 @@ def main():
     parser.add_argument('--sg_cl_weight', default=0.1, type=float, help='Weight for SG-MBSC sentiment contrastive loss.')
     parser.add_argument('--sg_dropout', default=0.2, type=float, help='Dropout before SG-MBSC final classifier.')
     parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for original SSEGCN aspect-pooling residual logits.')
+    parser.add_argument('--sg_shared_ce_weight', default=0.5, type=float, help='Auxiliary CE weight for the SG-MBSC shared branch.')
     
     # * pretrained language model
     parser.add_argument('--pretrained_bert_name', default='albert-base-v2', type=str)

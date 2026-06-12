@@ -53,9 +53,10 @@ python train.py --model_name sgmbsc_bert --dataset restaurant --pretrained_bert_
 ```
 
 The SG-MBSC head exposes `--sg_expert_dim`, `--sg_temperature`,
-`--sg_cl_weight`, `--sg_dropout`, and `--sg_base_weight` for the branch
-dimension, InfoNCE temperature, contrastive-loss weight, classifier dropout, and
-the residual weight of the original SSEGCN aspect-pooling classifier.
+`--sg_cl_weight`, `--sg_dropout`, `--sg_base_weight`, and
+`--sg_shared_ce_weight` for the branch dimension, contrastive temperature,
+contrastive-loss weight, classifier dropout, residual weight of the original
+SSEGCN aspect-pooling classifier, and auxiliary CE weight for the shared branch.
 
 To run the untouched original SSEGCN baseline for comparison:
 
