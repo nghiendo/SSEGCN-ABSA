@@ -37,10 +37,12 @@ class TestTrainRegularizationDefaults(unittest.TestCase):
         self.assertEqual(self.defaults['--sg_dropout'], 0.35)
         self.assertEqual(self.defaults['--bert_dropout'], 0.4)
 
-    def test_auxiliary_regularizer_defaults_are_stronger(self):
+    def test_default_objective_is_three_loss_only(self):
         self.assertEqual(self.defaults['--sg_branch_weight'], 0.05)
-        self.assertEqual(self.defaults['--sg_diversity_weight'], 0.1)
-        self.assertEqual(self.defaults['--sg_jepa_weight'], 0.15)
+        self.assertEqual(self.defaults['--sg_shared_ce_weight'], 0.5)
+        self.assertEqual(self.defaults['--sg_cl_weight'], 0.0)
+        self.assertEqual(self.defaults['--sg_diversity_weight'], 0.0)
+        self.assertEqual(self.defaults['--sg_jepa_weight'], 0.0)
 
 
 if __name__ == '__main__':

@@ -40,11 +40,18 @@ class TestSGMBSCAstGuards(unittest.TestCase):
         self.assertIn('diversity', segment)
         self.assertIn('jepa', segment)
 
-    def test_forward_logs_fusion_weights_and_uses_predicted_latent(self):
+    def test_forward_logs_only_shared_and_expert_fusion_weights(self):
         method = self._method('forward')
         segment = ast.get_source_segment(self.source, method) or ''
-        self.assertIn('fusion_weight_', segment)
+        self.assertIn('fusion_weight_shared', segment)
+        self.assertIn('fusion_weight_expert', segment)
+        self.assertNotIn('fusion_weight_base', segment)
         self.assertIn('predicted_latent', segment)
+
+    def test_head_has_no_base_classifier_or_three_way_fusion(self):
+        self.assertNotIn('self.base_classifier', self.source)
+        self.assertNotIn('self.base_weight', self.source)
+        self.assertNotIn('fusion_weights[:, 2:3]', self.source)
 
 
 if __name__ == '__main__':

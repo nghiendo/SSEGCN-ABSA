@@ -17,7 +17,6 @@ class SGMBSCHead(nn.Module):
         self.temperature = opt.sg_temperature
         self.cl_weight = opt.sg_cl_weight
         self.branch_weight = getattr(opt, "sg_branch_weight", 0.0)
-        self.base_weight = opt.sg_base_weight
         self.shared_ce_weight = getattr(opt, "sg_shared_ce_weight", 0.5)
         self.diversity_weight = getattr(opt, "sg_diversity_weight", 0.0)
         self.jepa_weight = getattr(opt, "sg_jepa_weight", 0.1)
@@ -43,7 +42,7 @@ class SGMBSCHead(nn.Module):
         })
         self.last_aux_metrics = {}
         self.jepa_context_projector = nn.Sequential(
-            nn.Linear(self.expert_dim * 2, self.expert_dim),
+            nn.Linear(self.expert_dim, self.expert_dim),
             nn.ReLU(),
             nn.Dropout(opt.sg_dropout),
         )
@@ -58,20 +57,14 @@ class SGMBSCHead(nn.Module):
             nn.Dropout(opt.sg_dropout),
             nn.Linear(self.expert_dim, self.expert_dim),
         )
-        self.base_projector = nn.Sequential(
-            nn.Linear(input_dim, self.expert_dim),
-            nn.ReLU(),
-            nn.Dropout(opt.sg_dropout),
-        )
         self.logit_fusion = nn.Sequential(
-            nn.Linear(self.expert_dim * 3, self.expert_dim),
+            nn.Linear(self.expert_dim * 2, self.expert_dim),
             nn.ReLU(),
             nn.Dropout(opt.sg_dropout),
-            nn.Linear(self.expert_dim, 3),
+            nn.Linear(self.expert_dim, 2),
         )
         self.expert_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
         self.shared_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
-        self.base_classifier = nn.Linear(input_dim, opt.polarities_dim)
         self.class_prototypes = nn.Parameter(torch.empty(len(self.expert_names), self.expert_dim))
         nn.init.xavier_uniform_(self.class_prototypes)
 
@@ -85,7 +78,6 @@ class SGMBSCHead(nn.Module):
         return {
             "fusion_weight_shared": fusion_weights[:, 0].detach().mean().item(),
             "fusion_weight_expert": fusion_weights[:, 1].detach().mean().item(),
-            "fusion_weight_base": fusion_weights[:, 2].detach().mean().item(),
         }
 
     def forward(self, sequence_outputs, sequence_mask=None, base_representation=None, labels=None):
@@ -105,31 +97,22 @@ class SGMBSCHead(nn.Module):
             gated[branch] = gate * pooled[branch] + (1.0 - gate) * shared_representation
 
         shared_logits = self.shared_classifier(self.dropout(shared_representation))
-        if base_representation is not None:
-            base_feature = self.base_projector(base_representation)
-            base_logits = self.base_weight * self.base_classifier(base_representation)
-        else:
-            base_feature = torch.zeros_like(shared_representation)
-            base_logits = torch.zeros_like(shared_logits)
-
-        context_input = torch.cat([shared_representation, base_feature], dim=-1)
+        context_input = shared_representation
         predicted_latent = self.jepa_predictor(self.jepa_context_projector(context_input))
         target_input = torch.cat([gated["pos"], gated["neu"], gated["neg"]], dim=-1)
         target_latent = self.jepa_target_projector(target_input)
         expert_logits = self.expert_classifier(self.dropout(predicted_latent))
 
-        fusion_input = torch.cat([shared_representation, predicted_latent, base_feature], dim=-1)
+        fusion_input = torch.cat([shared_representation, predicted_latent], dim=-1)
         fusion_weights = F.softmax(self.logit_fusion(fusion_input), dim=-1)
         logits = (
             fusion_weights[:, 0:1] * shared_logits
             + fusion_weights[:, 1:2] * expert_logits
-            + fusion_weights[:, 2:3] * base_logits
         )
 
         fusion_metrics = {
             "fusion_weight_shared": fusion_weights[:, 0].detach().mean().item(),
             "fusion_weight_expert": fusion_weights[:, 1].detach().mean().item(),
-            "fusion_weight_base": fusion_weights[:, 2].detach().mean().item(),
         }
         if labels is not None:
             aux_loss, aux_metrics = self._auxiliary_loss(pooled, gated, predicted_latent, target_latent, shared_logits, labels)
