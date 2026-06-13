@@ -223,7 +223,7 @@ class Instructor:
                     aux_metrics = getattr(getattr(self.model, 'sg_head', None), 'last_aux_metrics', None)
                     if aux_metrics:
                         metric_parts = []
-                        for key in ('aux_total', 'shared_ce', 'contrastive', 'branch_ce'):
+                        for key in ('aux_total', 'shared_ce', 'jepa', 'contrastive', 'branch_ce', 'diversity', 'fusion_weight_shared', 'fusion_weight_expert', 'fusion_weight_base'):
                             if key in aux_metrics:
                                 metric_parts.append('{}: {:.4f}'.format(key, aux_metrics[key]))
                         if metric_parts:
@@ -383,6 +383,8 @@ def main():
     parser.add_argument('--sg_temperature', default=0.2, type=float, help='Temperature for SG-MBSC sentiment contrastive loss.')
     parser.add_argument('--sg_cl_weight', default=0.1, type=float, help='Weight for SG-MBSC sentiment contrastive loss.')
     parser.add_argument('--sg_branch_weight', default=0.0, type=float, help='Weight for SG-MBSC private branch supervision loss.')
+    parser.add_argument('--sg_diversity_weight', default=0.05, type=float, help='Weight for SG-MBSC expert diversity regularization.')
+    parser.add_argument('--sg_jepa_weight', default=0.1, type=float, help='Weight for JEPA latent prediction loss in SG-MBSC.')
     parser.add_argument('--sg_dropout', default=0.2, type=float, help='Dropout before SG-MBSC final classifier.')
     parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for aspect-pooled residual logits.')
     parser.add_argument('--sg_shared_ce_weight', default=0.5, type=float, help='Auxiliary CE weight for the SG-MBSC shared branch.')
