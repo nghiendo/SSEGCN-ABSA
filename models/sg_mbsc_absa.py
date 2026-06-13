@@ -16,6 +16,7 @@ class SGMBSCHead(nn.Module):
         self.expert_dim = opt.sg_expert_dim if opt.sg_expert_dim > 0 else input_dim
         self.temperature = opt.sg_temperature
         self.cl_weight = opt.sg_cl_weight
+        self.branch_weight = getattr(opt, "sg_branch_weight", 0.0)
         self.base_weight = opt.sg_base_weight
         self.shared_ce_weight = getattr(opt, "sg_shared_ce_weight", 0.5)
         self.expert_names = ("pos", "neu", "neg")
@@ -34,6 +35,11 @@ class SGMBSCHead(nn.Module):
             for name in ("pos", "neu", "neg")
         })
         self.dropout = nn.Dropout(opt.sg_dropout)
+        self.branch_classifiers = nn.ModuleDict({
+            name: nn.Linear(self.expert_dim, 1)
+            for name in self.expert_names
+        })
+        self.last_aux_metrics = {}
         self.expert_classifier = nn.Linear(self.expert_dim * 3, opt.polarities_dim)
         self.shared_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
         self.base_classifier = nn.Linear(input_dim, opt.polarities_dim)
@@ -68,23 +74,50 @@ class SGMBSCHead(nn.Module):
         logits = shared_logits + expert_logits
         if base_representation is not None and self.base_weight > 0:
             logits = logits + self.base_weight * self.base_classifier(base_representation)
-        aux_loss = self._auxiliary_loss(gated, shared_logits, labels) if labels is not None else None
+        if labels is not None:
+            aux_loss = self._auxiliary_loss(pooled, gated, shared_logits, labels)
+        else:
+            aux_loss = None
+            self.last_aux_metrics = {}
         return logits, aux_loss
 
-    def _auxiliary_loss(self, gated, shared_logits, labels):
-        loss = self.shared_ce_weight * F.cross_entropy(shared_logits, labels)
+    def _auxiliary_loss(self, pooled, gated, shared_logits, labels):
+        shared_loss = self.shared_ce_weight * F.cross_entropy(shared_logits, labels)
+        loss = shared_loss
+        metrics = {
+            "shared_ce": shared_loss.detach().item(),
+        }
         if self.cl_weight > 0:
-            loss = loss + self._contrastive_loss(gated, labels)
+            contrastive_loss = self._contrastive_loss(gated, labels)
+            loss = loss + contrastive_loss
+            metrics["contrastive"] = contrastive_loss.detach().item()
+        if self.branch_weight > 0:
+            branch_loss = self._branch_supervision_loss(pooled, labels)
+            loss = loss + branch_loss
+            metrics["branch_ce"] = branch_loss.detach().item()
+        metrics["aux_total"] = loss.detach().item()
+        self.last_aux_metrics = metrics
         return loss
+
+    def _label_to_branch_targets(self, labels):
+        # Dataset labels: positive=0, negative=1, neutral=2.
+        # Branch order in this head: pos=0, neu=1, neg=2.
+        label_to_branch = torch.tensor([0, 2, 1], dtype=torch.long, device=labels.device)
+        return label_to_branch[labels]
+
+    def _branch_supervision_loss(self, pooled, labels):
+        branch_logits = torch.cat([
+            self.branch_classifiers[name](self.dropout(pooled[name]))
+            for name in self.expert_names
+        ], dim=-1)
+        branch_targets = self._label_to_branch_targets(labels)
+        return self.branch_weight * F.cross_entropy(branch_logits, branch_targets)
 
     def _contrastive_loss(self, gated, labels):
         branch_vectors = torch.stack([gated["pos"], gated["neu"], gated["neg"]], dim=1)
         branch_vectors = F.normalize(branch_vectors, p=2, dim=-1)
 
-        # Dataset labels: positive=0, negative=1, neutral=2.
-        # Branch order above: positive=0, neutral=1, negative=2.
-        label_to_branch = torch.tensor([0, 2, 1], dtype=torch.long, device=labels.device)
-        branch_targets = label_to_branch[labels]
+        branch_targets = self._label_to_branch_targets(labels)
         selected_experts = branch_vectors[torch.arange(labels.size(0), device=labels.device), branch_targets]
         prototypes = F.normalize(self.class_prototypes, p=2, dim=-1)
         similarities = torch.matmul(selected_experts, prototypes.transpose(0, 1)) / self.temperature

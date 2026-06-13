@@ -198,7 +198,16 @@ class Instructor:
                             logger.info('>> saved: {}'.format(model_path))
                     if f1 > max_f1:
                         max_f1 = f1
-                    logger.info('loss: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(loss.item(), train_acc, test_acc, f1))
+                    log_message = 'loss: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(loss.item(), train_acc, test_acc, f1)
+                    aux_metrics = getattr(getattr(self.model, 'sg_head', None), 'last_aux_metrics', None)
+                    if aux_metrics:
+                        metric_parts = []
+                        for key in ('aux_total', 'shared_ce', 'contrastive', 'branch_ce'):
+                            if key in aux_metrics:
+                                metric_parts.append('{}: {:.4f}'.format(key, aux_metrics[key]))
+                        if metric_parts:
+                            log_message = log_message + ', ' + ', '.join(metric_parts)
+                    logger.info(log_message)
         return max_test_acc, max_f1, model_path
     
     def _evaluate(self, show_results=False):
@@ -365,6 +374,7 @@ def main():
     parser.add_argument('--sg_expert_dim', default=0, type=int, help='SG-MBSC branch dimension; 0 keeps encoder dimension.')
     parser.add_argument('--sg_temperature', default=0.2, type=float, help='Temperature for SG-MBSC sentiment contrastive loss.')
     parser.add_argument('--sg_cl_weight', default=0.1, type=float, help='Weight for SG-MBSC sentiment contrastive loss.')
+    parser.add_argument('--sg_branch_weight', default=0.0, type=float, help='Weight for SG-MBSC private branch supervision loss.')
     parser.add_argument('--sg_dropout', default=0.2, type=float, help='Dropout before SG-MBSC final classifier.')
     parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for original SSEGCN aspect-pooling residual logits.')
     parser.add_argument('--sg_shared_ce_weight', default=0.5, type=float, help='Auxiliary CE weight for the SG-MBSC shared branch.')
