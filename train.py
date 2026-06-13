@@ -39,6 +39,29 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
 
 
+def validate_cuda_runtime(opt):
+    if opt.device.type != 'cuda':
+        return
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA was requested but torch.cuda.is_available() is False.')
+
+    device_index = torch.cuda.current_device()
+    device_name = torch.cuda.get_device_name(device_index)
+    capability = torch.cuda.get_device_capability(device_index)
+    arch = 'sm_{}{}'.format(capability[0], capability[1])
+    arch_list = set(torch.cuda.get_arch_list()) if hasattr(torch.cuda, 'get_arch_list') else set()
+
+    logger.info('cuda device: {} ({})'.format(device_name, arch))
+    if arch_list:
+        logger.info('torch cuda arch list: {}'.format(', '.join(sorted(arch_list))))
+        if arch not in arch_list:
+            raise RuntimeError(
+                'Incompatible CUDA runtime: current GPU {} uses {}, but this PyTorch build only has {}. '
+                'Use a GPU with a supported compute capability, switch to CPU with --device cpu, or install '
+                'a PyTorch build that supports this GPU.'.format(device_name, arch, ', '.join(sorted(arch_list)))
+            )
+
+
 class Instructor:
     ''' Model training and evaluation '''
     def __init__(self, opt):
@@ -382,6 +405,7 @@ def main():
     print("choice cuda:{}".format(opt.cuda))
     os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda
     opt.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') if opt.device is None else torch.device(opt.device)
+    validate_cuda_runtime(opt)
     
     # set random seed
     setup_seed(opt.seed)
