@@ -250,7 +250,8 @@ class Instructor:
         criterion = nn.CrossEntropyLoss()
         if 'bert' not in self.opt.model_name:
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
-            optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
+            non_bert_weight_decay = self.opt.weight_decay if self.opt.weight_decay > 0 else self.opt.l2reg
+            optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=non_bert_weight_decay)
         else:
             optimizer = self.get_bert_optimizer(self.model)
         max_test_acc_overall = 0
@@ -336,7 +337,7 @@ def main():
     parser.add_argument('--optimizer', default='adam', type=str, help=', '.join(optimizers.keys()))
     parser.add_argument('--initializer', default='xavier_uniform_', type=str, help=', '.join(initializers.keys()))
     parser.add_argument('--learning_rate', default=0.002, type=float)
-    parser.add_argument('--l2reg', default=1e-4, type=float)
+    parser.add_argument('--l2reg', default=1e-4, type=float, help='Legacy non-BERT weight decay fallback.')
     parser.add_argument('--num_epoch', default=20, type=int)
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--log_step', default=5, type=int)
@@ -362,7 +363,7 @@ def main():
     parser.add_argument('--max_length', default=85, type=int)
     parser.add_argument('--device', default=None, type=str, help='cpu, cuda')
     parser.add_argument('--seed', default=1000, type=int)
-    parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight deay if we apply some.")
+    parser.add_argument("--weight_decay", default=1e-4, type=float, help="Weight decay for both non-BERT and BERT optimizers.")
     parser.add_argument('--vocab_dir', type=str, default='./dataset/Laptops_corenlp')
     parser.add_argument('--pad_id', default=0, type=int)
     parser.add_argument('--parseadj', default=False, action='store_true', help='dependency probability')
