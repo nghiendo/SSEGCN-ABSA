@@ -1,8 +1,8 @@
 # SG-MBSC-ABSA
 This repository now uses SG-MBSC-ABSA as the only model family. It combines
 the repo's syntactic GCN encoder with shared-group multi-branch sentiment
-experts, cross-talk gating, a contrastive objective, and a residual
-aspect-pooled classifier path.
+experts, cross-talk gating, an explicit joint embedding, a contrastive
+objective, and a residual aspect-pooled classifier path.
 
 
 

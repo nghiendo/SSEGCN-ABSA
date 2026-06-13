@@ -188,12 +188,18 @@ neutral  -> 2
 | gated expert vectors mixed with shared branch      |
 +---------------------------+------------------------+
                             |
+                            v
++----------------------------------------------------+
+| Joint embedding                                    |
+| concat(pos, neu, neg, shared) -> projected latent  |
++---------------------------+------------------------+
+                            |
               +-------------+-------------+
               |                           |
               v                           v
 +---------------------------+   +---------------------------+
 | Final classifier          |   | Auxiliary losses          |
-| shared + expert + residual|   | shared CE + contrastive  |
+| joint + shared + residual |   | shared CE + contrastive  |
 +-------------+-------------+   +-------------+-------------+
               |                           |
               +-------------+-------------+
@@ -250,6 +256,7 @@ models/sg_mbsc_bert_encoder.py
 
 models/sg_mbsc_absa.py
   - multi-branch SG head
+  - joint embedding fusion
   - auxiliary losses
   - classifier wrappers
 ```

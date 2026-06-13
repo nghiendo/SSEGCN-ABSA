@@ -7,7 +7,7 @@ from models.sg_mbsc_bert_encoder import SGMBSCBertEncoder
 
 
 class SGMBSCHead(nn.Module):
-    """Shared/general branch plus sentiment-specific expert branches."""
+    """Shared branch, three sentiment experts, and an explicit joint embedding."""
 
     def __init__(self, input_dim, opt):
         super().__init__()
@@ -40,7 +40,12 @@ class SGMBSCHead(nn.Module):
             for name in self.expert_names
         })
         self.last_aux_metrics = {}
-        self.expert_classifier = nn.Linear(self.expert_dim * 3, opt.polarities_dim)
+        self.joint_projector = nn.Sequential(
+            nn.Linear(self.expert_dim * 4, self.expert_dim),
+            nn.ReLU(),
+            nn.Dropout(opt.sg_dropout),
+        )
+        self.expert_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
         self.shared_classifier = nn.Linear(self.expert_dim, opt.polarities_dim)
         self.base_classifier = nn.Linear(input_dim, opt.polarities_dim)
         self.class_prototypes = nn.Parameter(torch.empty(len(self.expert_names), self.expert_dim))
@@ -68,31 +73,36 @@ class SGMBSCHead(nn.Module):
             gate = torch.sigmoid(self.gates[branch](torch.cat([pooled[branch], shared_representation], dim=-1)))
             gated[branch] = gate * pooled[branch] + (1.0 - gate) * shared_representation
 
-        expert_fusion = torch.cat([gated["pos"], gated["neu"], gated["neg"]], dim=-1)
-        expert_logits = self.expert_classifier(self.dropout(expert_fusion))
+        joint_input = torch.cat(
+            [gated["pos"], gated["neu"], gated["neg"], shared_representation],
+            dim=-1,
+        )
+        joint_embedding = self.joint_projector(joint_input)
+        expert_logits = self.expert_classifier(self.dropout(joint_embedding))
         shared_logits = self.shared_classifier(self.dropout(shared_representation))
         logits = shared_logits + expert_logits
         if base_representation is not None and self.base_weight > 0:
             logits = logits + self.base_weight * self.base_classifier(base_representation)
         if labels is not None:
-            aux_loss = self._auxiliary_loss(pooled, gated, shared_logits, labels)
+            aux_loss = self._auxiliary_loss(pooled, gated, joint_embedding, shared_logits, labels)
         else:
             aux_loss = None
             self.last_aux_metrics = {}
         return logits, aux_loss
 
-    def _auxiliary_loss(self, pooled, gated, shared_logits, labels):
+    def _auxiliary_loss(self, pooled, gated, joint_embedding, shared_logits, labels):
         shared_loss = self.shared_ce_weight * F.cross_entropy(shared_logits, labels)
         loss = shared_loss
         metrics = {
             "shared_ce": shared_loss.detach().item(),
+            "joint_embedding_norm": joint_embedding.detach().norm(dim=-1).mean().item(),
         }
         if self.cl_weight > 0:
             contrastive_loss = self._contrastive_loss(gated, labels)
             loss = loss + contrastive_loss
             metrics["contrastive"] = contrastive_loss.detach().item()
         if self.branch_weight > 0:
-            branch_loss = self._branch_supervision_loss(pooled, labels)
+            branch_loss = self._branch_supervision_loss(gated, labels)
             loss = loss + branch_loss
             metrics["branch_ce"] = branch_loss.detach().item()
         metrics["aux_total"] = loss.detach().item()
@@ -105,9 +115,9 @@ class SGMBSCHead(nn.Module):
         label_to_branch = torch.tensor([0, 2, 1], dtype=torch.long, device=labels.device)
         return label_to_branch[labels]
 
-    def _branch_supervision_loss(self, pooled, labels):
+    def _branch_supervision_loss(self, branch_states, labels):
         branch_logits = torch.cat([
-            self.branch_classifiers[name](self.dropout(pooled[name]))
+            self.branch_classifiers[name](self.dropout(branch_states[name]))
             for name in self.expert_names
         ], dim=-1)
         branch_targets = self._label_to_branch_targets(labels)
