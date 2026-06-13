@@ -12,8 +12,8 @@
 - Do not change:
   - `train.py`
   - `data_utils.py`
-  - `models/ssegcn.py`
-  - `models/ssegcn_bert.py`
+  - `models/sg_mbsc_encoder.py`
+  - `models/sg_mbsc_bert_encoder.py`
   - dataset or preprocessing pipeline
 
 ## Current Head Structure

@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.ssegcn import GCN
-from models.ssegcn_bert import GCNBert
+from models.sg_mbsc_encoder import SGMBSCEncoder
+from models.sg_mbsc_bert_encoder import SGMBSCBertEncoder
 
 
 class SGMBSCHead(nn.Module):
@@ -137,7 +137,7 @@ class SGMBSCClassifier(nn.Module):
         super().__init__()
         self.opt = opt
         embeddings = self._build_embeddings(embedding_matrix, opt)
-        self.gcn = GCN(opt, embeddings, opt.hidden_dim, opt.num_layers)
+        self.gcn = SGMBSCEncoder(opt, embeddings, opt.hidden_dim, opt.num_layers)
         self.sg_head = SGMBSCHead(opt.hidden_dim, opt)
 
     def _build_embeddings(self, embedding_matrix, opt):
@@ -160,7 +160,7 @@ class SGMBSCBertClassifier(nn.Module):
     def __init__(self, bert, opt):
         super().__init__()
         self.opt = opt
-        self.gcn = GCNBert(bert, opt, opt.num_layers)
+        self.gcn = SGMBSCBertEncoder(bert, opt, opt.num_layers)
         self.sg_head = SGMBSCHead(100, opt)
 
     def forward(self, inputs, labels=None):

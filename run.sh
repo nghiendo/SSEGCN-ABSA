@@ -1,11 +1,8 @@
 #!/bin/bash
 # * laptop
 
-# * SG-MBSC-ABSA, upgraded default. The old name "ssegcn" is kept as an alias.
+# * SG-MBSC-ABSA
 python ./train.py --model_name sgmbsc --dataset laptop --seed 1000 --num_epoch 40 --vocab_dir ./dataset/Laptops_corenlp --cuda 0  
-
-# * Original SSEGCN baseline, only for comparison.
-# python ./train.py --model_name ssegcn_original --dataset laptop --seed 1000 --num_epoch 40 --vocab_dir ./dataset/Laptops_corenlp --cuda 0
 
 # * SG-MBSC-ABSA with Bert
 # python ./train.py --model_name sgmbsc_bert --dataset laptop --seed 1000 --bert_lr 2e-5 --num_epoch 10 --hidden_dim 768 --max_length 100 --cuda 0  

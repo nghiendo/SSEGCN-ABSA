@@ -1,8 +1,8 @@
 # SG-MBSC-ABSA
-This repository now uses SG-MBSC-ABSA as the default model. SG-MBSC-ABSA keeps
-the original SSEGCN encoder and adds shared-group multi-branch sentiment
-experts, cross-talk gating, a contrastive objective, and a residual baseline
-classifier path from the original aspect-pooling representation.
+This repository now uses SG-MBSC-ABSA as the only model family. It combines
+the repo's syntactic GCN encoder with shared-group multi-branch sentiment
+experts, cross-talk gating, a contrastive objective, and a residual
+aspect-pooled classifier path.
 
 
 
@@ -18,7 +18,7 @@ To install requirements, run `pip install -r requirements.txt`.
 
 ## Preparation
 
-1. Download and unzip GloVe vectors(`glove.840B.300d.zip`) from [https://nlp.stanford.edu/projects/glove/](https://nlp.stanford.edu/projects/glove/) and put it into  `SSEGCN/glove` directory.
+1. Download and unzip GloVe vectors(`glove.840B.300d.zip`) from [https://nlp.stanford.edu/projects/glove/](https://nlp.stanford.edu/projects/glove/) and put it into `glove/`.
 
 2. Prepare dataset with:
 
@@ -37,8 +37,7 @@ To train the current SG-MBSC-ABSA model, run:
 For a plain ASCII architecture map of this repository, see
 `ARCHITECTURE_ASCII.md`.
 
-The original model name `ssegcn` is kept as an upgraded alias for `sgmbsc`, so
-older commands now train the new model. For explicit commands, use:
+Use the current model names:
 
 ```powershell
 python train.py --model_name sgmbsc --dataset restaurant
@@ -55,15 +54,13 @@ python train.py --model_name sgmbsc_bert --dataset restaurant --pretrained_bert_
 The SG-MBSC head exposes `--sg_expert_dim`, `--sg_temperature`,
 `--sg_cl_weight`, `--sg_dropout`, `--sg_base_weight`, and
 `--sg_shared_ce_weight` for the branch dimension, contrastive temperature,
-contrastive-loss weight, classifier dropout, residual weight of the original
-SSEGCN aspect-pooling classifier, and auxiliary CE weight for the shared branch.
+contrastive-loss weight, classifier dropout, residual weight of the
+aspect-pooled classifier path, and auxiliary CE weight for the shared branch.
 
-To run the untouched original SSEGCN baseline for comparison:
+## Change Note
 
-```powershell
-python train.py --model_name ssegcn_original --dataset laptop --vocab_dir ./dataset/Laptops_corenlp
-python train.py --model_name ssegcn_bert_original --dataset laptop --pretrained_bert_name albert-base-v2
-```
+Legacy aliases and baseline implementations have been removed. Use `sgmbsc`
+and `sgmbsc_bert` only.
 
 ## Credits
 

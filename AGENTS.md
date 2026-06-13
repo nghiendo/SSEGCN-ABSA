@@ -7,11 +7,9 @@
 ## Model Names
 - Use `sgmbsc` for the current non-BERT model.
 - Use `sgmbsc_bert` for the BERT/ALBERT-backed variant.
-- `ssegcn` and `ssegcn_bert` are aliases to the upgraded SG-MBSC models in this repo, not the original baselines.
-- The original baselines are `ssegcn_original` and `ssegcn_bert_original`.
 
 ## Architecture
-- SG-MBSC-ABSA keeps the original SSEGCN encoders and replaces the old single classifier head with the multi-branch head in `models/sg_mbsc_absa.py`.
+- SG-MBSC-ABSA uses the dedicated encoders in `models/sg_mbsc_encoder.py` and `models/sg_mbsc_bert_encoder.py`, with the multi-branch head in `models/sg_mbsc_absa.py`.
 - The SG head has:
   - one shared branch
   - three sentiment-specific expert branches: `pos`, `neu`, `neg`
@@ -19,8 +17,6 @@
   - a residual baseline classifier path from the original aspect-pooled representation
   - auxiliary shared cross-entropy
   - prototype-based contrastive loss
-- Non-BERT SG-MBSC uses `models/ssegcn.py` for the encoder and `models/sg_mbsc_absa.py` for the head.
-- BERT SG-MBSC uses `models/ssegcn_bert.py` for the encoder and `models/sg_mbsc_absa.py` for the head.
 - The BERT path projects token states to size `100` before the SG head; the SG BERT head is wired to that dimension.
 
 ## Data Flow
@@ -57,9 +53,6 @@
   - `python train.py --model_name sgmbsc --dataset twitter --vocab_dir ./dataset/Tweets_corenlp`
 - BERT/ALBERT example:
   - `python train.py --model_name sgmbsc_bert --dataset laptop --pretrained_bert_name albert-base-v2`
-- Original baselines:
-  - `python train.py --model_name ssegcn_original --dataset laptop --vocab_dir ./dataset/Laptops_corenlp`
-  - `python train.py --model_name ssegcn_bert_original --dataset laptop --pretrained_bert_name albert-base-v2`
 
 ## Runtime Notes
 - SG-MBSC training adds an auxiliary penalty only for models that expose `supports_contrastive = True`.

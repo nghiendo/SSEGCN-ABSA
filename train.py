@@ -22,8 +22,6 @@ try:
 except ImportError:
     from transformers import AdamW
 
-from models.ssegcn import SSEGCNClassifier
-from models.ssegcn_bert import SSEGCNBertClassifier
 from models.sg_mbsc_absa import SGMBSCClassifier, SGMBSCBertClassifier
 from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData
 from prepare_vocab import VocabHelp
@@ -274,16 +272,9 @@ class Instructor:
 
 def main():
     model_classes = {
-        'ssegcn': SGMBSCClassifier,
-        'ssegcnbert': SGMBSCBertClassifier,
-        'ssegcn_bert': SGMBSCBertClassifier,
         'sgmbsc': SGMBSCClassifier,
         'sgmbscbert': SGMBSCBertClassifier,
         'sgmbsc_bert': SGMBSCBertClassifier,
-        'ssegcn_original': SSEGCNClassifier,
-        'ssegcnbert_original': SSEGCNBertClassifier,
-        'ssegcn_bert_original': SSEGCNBertClassifier,
-
     }
     
     dataset_files = {
@@ -302,16 +293,9 @@ def main():
     }
     
     input_colses = {
- 
-        'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
         'sgmbsc': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcn_original': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
-        'ssegcn_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
         'sgmbscbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
         'sgmbsc_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
-        'ssegcnbert_original': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
-        'ssegcn_bert_original': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
     }
     
     initializers = {
@@ -377,7 +361,7 @@ def main():
     parser.add_argument('--sg_cl_weight', default=0.1, type=float, help='Weight for SG-MBSC sentiment contrastive loss.')
     parser.add_argument('--sg_branch_weight', default=0.0, type=float, help='Weight for SG-MBSC private branch supervision loss.')
     parser.add_argument('--sg_dropout', default=0.2, type=float, help='Dropout before SG-MBSC final classifier.')
-    parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for original SSEGCN aspect-pooling residual logits.')
+    parser.add_argument('--sg_base_weight', default=1.0, type=float, help='Weight for aspect-pooled residual logits.')
     parser.add_argument('--sg_shared_ce_weight', default=0.5, type=float, help='Auxiliary CE weight for the SG-MBSC shared branch.')
     
     # * pretrained language model

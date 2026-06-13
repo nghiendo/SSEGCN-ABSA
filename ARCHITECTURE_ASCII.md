@@ -1,69 +1,9 @@
 # SG-MBSC-ABSA Repository Architecture
 
-This document describes the current repository with plain ASCII diagrams.
+This document describes the current repository after removing the legacy model
+family.
 
-## 1. Repository Layout
-
-```text
-SSEGCN-ABSA/
-|
-|-- train.py
-|   `-- Main CLI, dataset selection, SG-MBSC model selection, train/eval loop
-|
-|-- data_utils.py
-|   `-- Dataset parsing, tokenization, embedding matrix, PyTorch Dataset classes
-|
-|-- prepare_vocab.py
-|   `-- Vocabulary helper used by the non-BERT pipeline
-|
-|-- tree.py
-|   `-- Dependency tree utilities
-|
-|-- layers.py
-|   `-- Generic neural network layers kept from the base project
-|
-|-- models/
-|   |-- ssegcn.py
-|   |   `-- Original GloVe/LSTM/SSEGCN encoder and baseline classifier
-|   |
-|   |-- ssegcn_bert.py
-|   |   `-- Original BERT/SSEGCN encoder and baseline classifier
-|   |
-|   `-- sg_mbsc_absa.py
-|       `-- SG-MBSC-ABSA extension with multi-branch sentiment experts
-|
-|-- dataset/
-|   |-- Restaurants_corenlp/
-|   |   |-- train.json
-|   |   |-- test.json
-|   |   |-- train_write.json
-|   |   `-- test_write.json
-|   |
-|   |-- Laptops_corenlp/
-|   |   |-- train.json
-|   |   |-- test.json
-|   |   |-- train_write.json
-|   |   `-- test_write.json
-|   |
-|   |-- Tweets_corenlp/
-|   |   |-- train.json
-|   |   |-- test.json
-|   |   |-- train_write.json
-|   |   `-- test_write.json
-|   |
-|   `-- preprocess_data.py
-|
-|-- glove/
-|   `-- readme.md
-|
-|-- run.sh
-|-- build_vocab.sh
-|-- requirements.txt
-|-- README.md
-`-- CODE_ISSUES_REPORT.md
-```
-
-## 2. Top-Level Runtime Flow
+## 1. Runtime Flow
 
 ```text
 +------------------+
@@ -84,8 +24,6 @@ SSEGCN-ABSA/
 | Select model_name            |
 | sgmbsc                       |
 | sgmbsc_bert                  |
-| ssegcn -> sgmbsc alias       |
-| ssegcn_original baseline     |
 +--------+---------------------+
          |
          v
@@ -107,7 +45,7 @@ SSEGCN-ABSA/
 | Instructor._train            |
 | - forward                    |
 | - CE loss                    |
-| - optional contrastive loss  |
+| - auxiliary SG losses        |
 | - optimizer step             |
 +--------+---------------------+
          |
@@ -120,12 +58,12 @@ SSEGCN-ABSA/
 +------------------------------+
 ```
 
-## 3. Dataset Pipeline
+## 2. Dataset Pipeline
 
 ```text
 +------------------------------+
 | dataset/*_corenlp/*.json     |
-| sentence, aspect, label, POS  |
+| sentence, aspect, label, POS |
 | head, deprel, short distance |
 +---------------+--------------+
                 |
@@ -162,9 +100,9 @@ negative -> 1
 neutral  -> 2
 ```
 
-## 4. Original SSEGCN Encoder Flow
+## 3. Encoder Paths
 
-### 4.1 Non-BERT SSEGCN
+### 3.1 Non-BERT `sgmbsc`
 
 ```text
 +------------------------------+
@@ -187,29 +125,18 @@ neutral  -> 2
                 |
                 v
 +------------------------------+
-| Multi-head syntactic/semantic|
-| attention adjacency          |
+| Multi-head adjacency         |
+| aspect-aware + short_mask    |
 +---------------+--------------+
                 |
                 v
 +------------------------------+
-| GCN message passing          |
-+---------------+--------------+
-                |
-                v
-+------------------------------+
-| Aspect mask pooling          |
-+---------------+--------------+
-                |
-                v
-+------------------------------+
-| Baseline classifier          |
-| available through            |
-| ssegcn_original              |
+| SGMBSCEncoder                |
+| models/sg_mbsc_encoder.py    |
 +------------------------------+
 ```
 
-### 4.2 BERT SSEGCN
+### 3.2 BERT `sgmbsc_bert`
 
 ```text
 +------------------------------+
@@ -220,46 +147,22 @@ neutral  -> 2
                 |
                 v
 +------------------------------+
-| AutoModel                    |
-| last_hidden_state            |
+| AutoModel + LayerNorm        |
 +---------------+--------------+
                 |
                 v
 +------------------------------+
-| Projection to attention dim  |
+| Projection to size 100       |
 +---------------+--------------+
                 |
                 v
 +------------------------------+
-| Multi-head adjacency         |
-+---------------+--------------+
-                |
-                v
-+------------------------------+
-| GCN message passing          |
-+---------------+--------------+
-                |
-                v
-+------------------------------+
-| Aspect mask pooling          |
-+---------------+--------------+
-                |
-                v
-+------------------------------+
-| Baseline classifier          |
-| available through            |
-| ssegcn_bert_original         |
+| SGMBSCBertEncoder            |
+| models/sg_mbsc_bert_encoder.py|
 +------------------------------+
 ```
 
-## 5. SG-MBSC-ABSA Extension
-
-The SG-MBSC models keep the existing encoders and replace the single pooled
-classifier head with one shared/general branch plus three sentiment-specific
-expert branches. The shared branch is trained with standard cross-entropy, while
-the positive/neutral/negative expert branches are regularized with a
-prototype-style contrastive objective. The original aspect-pooling
-representation is also kept as a residual classifier path.
+## 4. SG Head
 
 ```text
 +------------------------------+
@@ -270,106 +173,58 @@ representation is also kept as a residual classifier path.
                 v
 +----------------------------------------------------+
 | Sentiment expert projections                       |
-|                                                    |
-| X -> Positive branch -> H_pos                      |
-| X -> Neutral branch  -> H_neu                      |
-| X -> Negative branch -> H_neg                      |
-| X -> Shared branch   -> H_shared                   |
+| X -> pos, neu, neg, shared                         |
 +---------------------------+------------------------+
                             |
                             v
 +----------------------------------------------------+
-| Local attention pooling                            |
-|                                                    |
-| H_pos    -> v_pos                                  |
-| H_neu    -> v_neu                                  |
-| H_neg    -> v_neg                                  |
-| H_shared -> v_shared                               |
+| Masked local attention pooling                     |
+| v_pos, v_neu, v_neg, v_shared                      |
 +---------------------------+------------------------+
                             |
                             v
 +----------------------------------------------------+
 | Cross-talk gating                                  |
-|                                                    |
-| Shared/general -> experts:                         |
-|   v_pos + v_shared -> gated positive vector        |
-|   v_neu + v_shared -> gated neutral vector         |
-|   v_neg + v_shared -> gated negative vector        |
+| gated expert vectors mixed with shared branch      |
 +---------------------------+------------------------+
                             |
               +-------------+-------------+
               |                           |
               v                           v
 +---------------------------+   +---------------------------+
-| Unified classifier        |   | Expert contrastive loss   |
-| shared logits             |   | selected sentiment expert |
-| + expert fusion logits    |   | vs learned class prototype|
-| + residual base logits    |   | target branch from label  |
+| Final classifier          |   | Auxiliary losses          |
+| shared + expert + residual|   | shared CE + contrastive  |
 +-------------+-------------+   +-------------+-------------+
-              |                           |
-              v                           |
-+---------------------------+             |
-| Shared branch CE          |             |
-| standard supervised loss  |             |
-+-------------+-------------+             |
               |                           |
               +-------------+-------------+
                             |
                             v
 +----------------------------------------------------+
-| Training loss                                       |
-| CE(final logits, label)                             |
-| + sg_shared_ce_weight * CE(shared logits, label)    |
-| + sg_cl_weight * expert prototype contrastive loss  |
+| Total loss                                         |
+| CE(final logits) + SG auxiliary penalties          |
 +----------------------------------------------------+
 ```
 
-### 5.1 SG-MBSC Model Names
+Contrastive branch mapping:
 
 ```text
-sgmbsc
-  encoder: models.ssegcn.GCN
-  head:    SGMBSCHead
-
-sgmbscbert
-  encoder: models.ssegcn_bert.GCNBert
-  head:    SGMBSCHead
-
-ssegcn
-  alias:   sgmbsc
-
-ssegcn_bert
-  alias:   sgmbsc_bert
-
-ssegcn_original
-  encoder/head: original models.ssegcn.SSEGCNClassifier
-
-ssegcn_bert_original
-  encoder/head: original models.ssegcn_bert.SSEGCNBertClassifier
-```
-
-### 5.2 Contrastive Branch Mapping
-
-The dataset label order differs from the expert branch order.
-
-```text
-Dataset label order:
+Dataset labels:
   positive -> 0
   negative -> 1
   neutral  -> 2
 
-SG-MBSC branch order:
+Branch order:
   positive -> 0
   neutral  -> 1
   negative -> 2
 
-Remap used for contrastive target:
+Remap:
   label 0 -> branch 0
   label 1 -> branch 2
   label 2 -> branch 1
 ```
 
-## 6. Training Commands
+## 5. Training Commands
 
 ```text
 python train.py --model_name sgmbsc --dataset restaurant
@@ -377,56 +232,24 @@ python train.py --model_name sgmbsc --dataset laptop
 python train.py --model_name sgmbsc --dataset twitter
 
 python train.py --model_name sgmbsc_bert --dataset restaurant --pretrained_bert_name albert-base-v2
-
-python train.py --model_name ssegcn_original --dataset laptop
-python train.py --model_name ssegcn_bert_original --dataset laptop --pretrained_bert_name albert-base-v2
 ```
 
-## 7. SG-MBSC Tunable Arguments
-
-```text
---sg_expert_dim     Branch projection size. 0 keeps encoder hidden size.
---sg_temperature    Temperature for InfoNCE similarity logits.
---sg_cl_weight      Weight of the contrastive loss term.
---sg_dropout        Dropout before the final fusion classifier.
---sg_base_weight    Weight of the original SSEGCN residual logits.
---sg_shared_ce_weight
-                    Auxiliary CE weight for the shared/general branch.
-```
-
-## 8. Code Ownership Map
+## 6. Key Files
 
 ```text
 train.py
-  owns:
-    - CLI arguments
-    - model registry
-    - dataset registry
-    - optimizer selection
-    - train/evaluate/test loop
+  - CLI arguments
+  - model registry
+  - train/evaluate/test loop
 
-data_utils.py
-  owns:
-    - reading JSON datasets
-    - converting labels to ids
-    - building token ids and masks
-    - building BERT inputs
+models/sg_mbsc_encoder.py
+  - non-BERT SG-MBSC encoder
 
-models/ssegcn.py
-  owns:
-    - non-BERT SSEGCN encoder
-    - original non-BERT classifier
-
-models/ssegcn_bert.py
-  owns:
-    - BERT-backed SSEGCN encoder
-    - original BERT classifier
+models/sg_mbsc_bert_encoder.py
+  - BERT-backed SG-MBSC encoder
 
 models/sg_mbsc_absa.py
-  owns:
-    - SG-MBSC expert branches
-    - cross-talk gating
-    - shared feedback
-    - InfoNCE contrastive loss
-    - SG-MBSC classifier wrappers
+  - multi-branch SG head
+  - auxiliary losses
+  - classifier wrappers
 ```
