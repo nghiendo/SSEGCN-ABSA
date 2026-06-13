@@ -224,7 +224,7 @@ class SentenceDataset(Dataset):
             mask_3 = [[-99999] * opt.max_length for _ in range(opt.max_length)]
             mask_4 = [[-99999] * opt.max_length for _ in range(opt.max_length)]
             mask_5 = [[-99999] * opt.max_length for _ in range(opt.max_length)]
-            short_length = len(obj['short'])
+            short_length = min(len(obj['short']), opt.max_length)
             assert len(obj['short']) == len(obj['short'][0])
             for i in range(short_length):
                 for j in range(short_length):
@@ -397,6 +397,9 @@ class ABSAGCNData(Dataset):
                 else:
                     right_tokens.pop()
                     right_tok2ori_map.pop()
+
+            asp_start = len(left_tokens)
+            asp_end = asp_start + len(term_tokens)
                     
             bert_tokens = left_tokens + term_tokens + right_tokens
             tok2ori_map = left_tok2ori_map + term_tok2ori_map + right_tok2ori_map
@@ -419,8 +422,8 @@ class ABSAGCNData(Dataset):
             context_asp_ids = np.asarray(context_asp_ids, dtype='int64')
             context_asp_seg_ids = np.asarray(context_asp_seg_ids, dtype='int64')
             context_asp_attention_mask = np.asarray(context_asp_attention_mask, dtype='int64')
-            src_mask = np.asarray(src_mask, dtype='int64')
-            aspect_mask = np.asarray(aspect_mask, dtype='int64')
+            src_mask = Tokenizer.pad_sequence(src_mask, pad_id=0, maxlen=opt.max_length, dtype='int64', padding='post', truncating='post')
+            aspect_mask = Tokenizer.pad_sequence(aspect_mask, pad_id=0, maxlen=opt.max_length, dtype='int64', padding='post', truncating='post')
 
             row_short = obj['short']
             
