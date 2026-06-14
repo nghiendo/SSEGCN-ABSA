@@ -345,10 +345,24 @@ def softmax(x):
 
 class Tokenizer4BertGCN:
     def __init__(self, max_seq_len, pretrained_bert_name):
-        self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_bert_name)
-        self.cls_token_id = self.tokenizer.cls_token_id
-        self.sep_token_id = self.tokenizer.sep_token_id
+        model_max_length = getattr(self.tokenizer, 'model_max_length', max_seq_len)
+        if model_max_length is None or model_max_length > 100000:
+            model_max_length = max_seq_len
+        self.max_seq_len = min(max_seq_len, model_max_length)
+
+        cls_token_id = getattr(self.tokenizer, 'cls_token_id', None)
+        bos_token_id = getattr(self.tokenizer, 'bos_token_id', None)
+        sep_token_id = getattr(self.tokenizer, 'sep_token_id', None)
+        eos_token_id = getattr(self.tokenizer, 'eos_token_id', None)
+        pad_token_id = getattr(self.tokenizer, 'pad_token_id', None)
+
+        self.cls_token_id = cls_token_id if cls_token_id is not None else bos_token_id
+        self.sep_token_id = sep_token_id if sep_token_id is not None else eos_token_id
+        self.pad_token_id = pad_token_id if pad_token_id is not None else self.sep_token_id
+
+        if self.cls_token_id is None or self.sep_token_id is None:
+            raise ValueError('Tokenizer must define BOS/CLS and EOS/SEP token ids.')
     def tokenize(self, s):
         return self.tokenizer.tokenize(s)
     def convert_tokens_to_ids(self, tokens):
@@ -390,13 +404,21 @@ class ABSAGCNData(Dataset):
                     right_tokens.append(t)
                     right_tok2ori_map.append(ori_i+offset)
 
-            while len(left_tokens) + len(right_tokens) > tokenizer.max_seq_len-2*len(term_tokens) - 3:
+            max_term_len = max((tokenizer.max_seq_len - 3) // 2, 1)
+            if len(term_tokens) > max_term_len:
+                term_tokens = term_tokens[:max_term_len]
+                term_tok2ori_map = term_tok2ori_map[:max_term_len]
+                asp_end = asp_start + len(term_tokens)
+
+            while len(left_tokens) + len(right_tokens) > tokenizer.max_seq_len - 2 * len(term_tokens) - 3:
                 if len(left_tokens) > len(right_tokens):
                     left_tokens.pop(0)
                     left_tok2ori_map.pop(0)
-                else:
+                elif right_tokens:
                     right_tokens.pop()
                     right_tok2ori_map.pop()
+                else:
+                    break
                     
             bert_tokens = left_tokens + term_tokens + right_tokens
             tok2ori_map = left_tok2ori_map + term_tok2ori_map + right_tok2ori_map
@@ -408,7 +430,7 @@ class ABSAGCNData(Dataset):
             context_asp_ids = [tokenizer.cls_token_id]+tokenizer.convert_tokens_to_ids(
                 bert_tokens)+[tokenizer.sep_token_id]+tokenizer.convert_tokens_to_ids(term_tokens)+[tokenizer.sep_token_id]
             context_asp_len = len(context_asp_ids)
-            paddings = [0] * (tokenizer.max_seq_len - context_asp_len)
+            paddings = [tokenizer.pad_token_id] * (tokenizer.max_seq_len - context_asp_len)
             context_len = len(bert_tokens)
             context_asp_seg_ids = [0] * (1 + context_len + 1) + [1] * (len(term_tokens) + 1) + paddings
             src_mask = [0] + [1] * context_len + [0] * (opt.max_length - context_len - 1)

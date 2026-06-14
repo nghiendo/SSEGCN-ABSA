@@ -16,7 +16,7 @@ import numpy as np
 from sklearn import metrics
 from time import strftime, localtime
 from torch.utils.data import DataLoader
-from transformers import BertModel
+from transformers import CLIPTextModel
 try:
     from torch.optim import AdamW
 except ImportError:
@@ -44,10 +44,11 @@ class Instructor:
     ''' Model training and evaluation '''
     def __init__(self, opt):
         self.opt = opt
-        if 'bert' in opt.model_name:
+        if 'bert' in opt.model_name or 'clip' in opt.model_name:
             tokenizer = Tokenizer4BertGCN(opt.max_length, opt.pretrained_bert_name)
-            bert = BertModel.from_pretrained(opt.pretrained_bert_name)
-            self.model = opt.model_class(bert, opt).to(opt.device)
+            opt.max_length = tokenizer.max_seq_len
+            text_encoder = CLIPTextModel.from_pretrained(opt.pretrained_bert_name)
+            self.model = opt.model_class(text_encoder, opt).to(opt.device)
             trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt)
             testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt)
         else:    
@@ -111,7 +112,7 @@ class Instructor:
     def get_bert_optimizer(self, model):
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ['bias', 'LayerNorm.weight']
-        diff_part = ["bert.embeddings", "bert.encoder"]
+        diff_part = ["gcn_model.gcn.bert", "gcn_model.gcn.encoder"]
 
         if self.opt.diff_lr:
             logger.info("layered learning rate on")
@@ -236,7 +237,7 @@ class Instructor:
     
     def run(self):
         criterion = nn.CrossEntropyLoss()
-        if 'bert' not in self.opt.model_name:
+        if 'bert' not in self.opt.model_name and 'clip' not in self.opt.model_name:
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
             optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
         else:
@@ -244,7 +245,7 @@ class Instructor:
         max_test_acc_overall = 0
         max_f1_overall = 0
         model_path = ''  # Initialize model_path
-        if 'bert' not in self.opt.model_name:
+        if 'bert' not in self.opt.model_name and 'clip' not in self.opt.model_name:
             self._reset_params()
         max_test_acc, max_f1, model_path = self._train(criterion, optimizer, max_test_acc_overall)
         logger.info('max_test_acc: {0}, max_f1: {1}'.format(max_test_acc, max_f1))
@@ -263,6 +264,7 @@ def main():
     model_classes = {
         'ssegcn': SSEGCNClassifier,
         'ssegcnbert': SSEGCNBertClassifier,
+        'ssegcnclip': SSEGCNBertClassifier,
 
     }
     
@@ -284,7 +286,8 @@ def main():
     input_colses = {
  
         'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
+        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'ssegcnclip': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
     }
     
     initializers = {
@@ -347,10 +350,10 @@ def main():
     parser.add_argument('--beta', default=0.25, type=float)
     
     # * bert
-    parser.add_argument('--pretrained_bert_name', default='bert-base-uncased', type=str)
+    parser.add_argument('--pretrained_bert_name', default='openai/clip-vit-base-patch32', type=str)
     parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
-    parser.add_argument('--bert_dim', type=int, default=768)
-    parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
+    parser.add_argument('--bert_dim', type=int, default=512)
+    parser.add_argument('--bert_dropout', type=float, default=0.3, help='Transformer encoder dropout rate.')
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
     opt = parser.parse_args()

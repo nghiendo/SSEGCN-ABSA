@@ -57,6 +57,7 @@ class GCNAbsaModel(nn.Module):
 class GCNBert(nn.Module):
     def __init__(self, bert, opt, num_layers):
         super(GCNBert, self).__init__()
+        self.encoder = bert
         self.bert = bert
         self.opt = opt
         self.layers = num_layers
@@ -93,10 +94,12 @@ class GCNBert(nn.Module):
         seq_len = src_mask.size()[2]
 
         
-        sequence_output, pooled_output = self.bert(text_bert_indices, attention_mask=attention_mask, token_type_ids=bert_segments_ids)
-        sequence_output = self.layernorm(sequence_output)
-        gcn_inputs = self.bert_drop(sequence_output)  
-        pooled_output = self.pooled_drop(pooled_output)
+        encoder_outputs = self.encoder(input_ids=text_bert_indices, attention_mask=attention_mask)
+        sequence_output = self.layernorm(encoder_outputs.last_hidden_state)
+        gcn_inputs = self.bert_drop(sequence_output)
+        pooled_output = getattr(encoder_outputs, 'pooler_output', None)
+        if pooled_output is not None:
+            pooled_output = self.pooled_drop(pooled_output)
 
         gcn_inputs = self.Wxx(gcn_inputs)
         
@@ -117,7 +120,7 @@ class GCNBert(nn.Module):
 
         for i in range(self.layers):
 
-            gcn_outputs = gcn_outputs.unsqueeze(1).expand(batch, self.attention_heads, len, self.attdim)   
+            gcn_outputs = gcn_outputs.unsqueeze(1).expand(batch, self.attention_heads, seq_len, self.attdim)
             Ax = torch.matmul(weight_adj, gcn_outputs)     
             Ax = Ax.mean(dim=1)  
   
@@ -129,7 +132,7 @@ class GCNBert(nn.Module):
             gcn_outputs = self.gcn_drop(gcn_outputs) if i < self.layers - 1 else gcn_outputs 
 
             weight_adj=weight_adj.permute(0, 2, 3, 1).contiguous()    
-            node_outputs1 = gcn_outputs.unsqueeze(1).expand(batch, len, len, self.attdim)   
+            node_outputs1 = gcn_outputs.unsqueeze(1).expand(batch, seq_len, seq_len, self.attdim)
             node_outputs2 = node_outputs1.permute(0, 2, 1, 3).contiguous() 
             node = torch.cat([node_outputs1, node_outputs2], dim=-1) 
             edge_n=torch.cat([weight_adj, node], dim=-1)
