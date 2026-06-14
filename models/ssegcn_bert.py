@@ -92,12 +92,13 @@ class GCNBert(nn.Module):
         batch = src_mask.size(0)
         seq_len = src_mask.size()[2]
 
-        outputs = self.bert(text_bert_indices, attention_mask=attention_mask, token_type_ids=bert_segments_ids)
-        sequence_output = outputs[0]
-        pooled_output = outputs[1]
+        bert_kwargs = {"attention_mask": attention_mask}
+        if getattr(self.bert.config, "type_vocab_size", 0) > 0:
+            bert_kwargs["token_type_ids"] = bert_segments_ids
+        outputs = self.bert(text_bert_indices, **bert_kwargs)
+        sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
         sequence_output = self.layernorm(sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  
-        pooled_output = self.pooled_drop(pooled_output)
 
         gcn_inputs = self.Wxx(gcn_inputs)
         

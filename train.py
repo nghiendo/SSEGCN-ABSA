@@ -16,7 +16,7 @@ import numpy as np
 from sklearn import metrics
 from time import strftime, localtime
 from torch.utils.data import DataLoader
-from transformers import BertModel
+from transformers import AutoModel
 try:
     from torch.optim import AdamW
 except ImportError:
@@ -46,7 +46,7 @@ class Instructor:
         self.opt = opt
         if 'bert' in opt.model_name:
             tokenizer = Tokenizer4BertGCN(opt.max_length, opt.pretrained_bert_name)
-            bert = BertModel.from_pretrained(opt.pretrained_bert_name)
+            bert = AutoModel.from_pretrained(opt.pretrained_bert_name)
             self.model = opt.model_class(bert, opt).to(opt.device)
             trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt)
             testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt)
@@ -263,6 +263,7 @@ def main():
     model_classes = {
         'ssegcn': SSEGCNClassifier,
         'ssegcnbert': SSEGCNBertClassifier,
+        'ssegcn_bert': SSEGCNBertClassifier,
 
     }
     
@@ -284,7 +285,8 @@ def main():
     input_colses = {
  
         'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
+        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
+        'ssegcn_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
     }
     
     initializers = {
@@ -347,7 +349,7 @@ def main():
     parser.add_argument('--beta', default=0.25, type=float)
     
     # * bert
-    parser.add_argument('--pretrained_bert_name', default='bert-base-uncased', type=str)
+    parser.add_argument('--pretrained_bert_name', default='microsoft/deberta-base', type=str)
     parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
     parser.add_argument('--bert_dim', type=int, default=768)
     parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
