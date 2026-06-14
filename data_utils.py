@@ -390,14 +390,12 @@ class ABSAGCNData(Dataset):
                 for t in tokenizer.tokenize(w):
                     left_tokens.append(t)                   # * ['expand', '##able', 'highly', 'like', '##ing']
                     left_tok2ori_map.append(ori_i)          # * [0, 0, 1, 2, 2]
-            asp_start = len(left_tokens)  
             offset = len(left) 
             for ori_i, w in enumerate(term):        
                 for t in tokenizer.tokenize(w):
                     term_tokens.append(t)
                     # term_tok2ori_map.append(ori_i)
                     term_tok2ori_map.append(ori_i + offset)
-            asp_end = asp_start + len(term_tokens)
             offset += len(term) 
             for ori_i, w in enumerate(right):
                 for t in tokenizer.tokenize(w):
@@ -419,6 +417,9 @@ class ABSAGCNData(Dataset):
                     right_tok2ori_map.pop()
                 else:
                     break
+
+            asp_start = len(left_tokens)
+            asp_end = asp_start + len(term_tokens)
                     
             bert_tokens = left_tokens + term_tokens + right_tokens
             tok2ori_map = left_tok2ori_map + term_tok2ori_map + right_tok2ori_map
