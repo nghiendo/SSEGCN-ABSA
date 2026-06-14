@@ -118,7 +118,7 @@ class GCNBert(nn.Module):
 
         for i in range(self.layers):
 
-            gcn_outputs = gcn_outputs.unsqueeze(1).expand(batch, self.attention_heads, len, self.attdim)   
+            gcn_outputs = gcn_outputs.unsqueeze(1).expand(batch, self.attention_heads, seq_len, self.attdim)   
             Ax = torch.matmul(weight_adj, gcn_outputs)     
             Ax = Ax.mean(dim=1)  
   
@@ -130,7 +130,7 @@ class GCNBert(nn.Module):
             gcn_outputs = self.gcn_drop(gcn_outputs) if i < self.layers - 1 else gcn_outputs 
 
             weight_adj=weight_adj.permute(0, 2, 3, 1).contiguous()    
-            node_outputs1 = gcn_outputs.unsqueeze(1).expand(batch, len, len, self.attdim)   
+            node_outputs1 = gcn_outputs.unsqueeze(1).expand(batch, seq_len, seq_len, self.attdim)   
             node_outputs2 = node_outputs1.permute(0, 2, 1, 3).contiguous() 
             node = torch.cat([node_outputs1, node_outputs2], dim=-1) 
             edge_n=torch.cat([weight_adj, node], dim=-1)
