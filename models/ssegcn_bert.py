@@ -92,8 +92,9 @@ class GCNBert(nn.Module):
         batch = src_mask.size(0)
         seq_len = src_mask.size()[2]
 
-        
-        sequence_output, pooled_output = self.bert(text_bert_indices, attention_mask=attention_mask, token_type_ids=bert_segments_ids)
+        outputs = self.bert(text_bert_indices, attention_mask=attention_mask, token_type_ids=bert_segments_ids)
+        sequence_output = outputs[0]
+        pooled_output = outputs[1]
         sequence_output = self.layernorm(sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  
         pooled_output = self.pooled_drop(pooled_output)
