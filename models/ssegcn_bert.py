@@ -11,6 +11,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def check_finite(name, tensor):
+    if torch.isfinite(tensor).all():
+        return
+    finite = tensor[torch.isfinite(tensor)]
+    if finite.numel() > 0:
+        detail = "finite_min={:.6g}, finite_max={:.6g}".format(finite.min().item(), finite.max().item())
+    else:
+        detail = "no finite values"
+    raise FloatingPointError("{} contains NaN/Inf; shape={}, {}".format(name, tuple(tensor.shape), detail))
+
+
 class LayerNorm(nn.Module):
 
     def __init__(self, features, eps=1e-6):
@@ -48,7 +59,7 @@ class GCNAbsaModel(nn.Module):
     def forward(self, inputs):
         text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask= inputs
         h = self.gcn(inputs)    
-        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)  
+        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)
         aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, 100)  
         outputs1 = (h*aspect_mask).sum(dim=1) / asp_wn
         return outputs1   
@@ -102,16 +113,21 @@ class GCNBert(nn.Module):
             bert_kwargs["token_type_ids"] = bert_segments_ids
         outputs = self.bert(text_bert_indices, **bert_kwargs)
         sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+        check_finite("bert.last_hidden_state", sequence_output)
         sequence_output = self.layernorm(sequence_output)
+        check_finite("layernorm(sequence_output)", sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  
 
         gcn_inputs = self.Wxx(gcn_inputs)
+        check_finite("Wxx(gcn_inputs)", gcn_inputs)
         
-        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)  
+        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)
         aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, 100) 
         aspect = (gcn_inputs*aspect_mask).sum(dim=1) / asp_wn   
+        check_finite("aspect", aspect)
 
         attn_tensor = self.attn(gcn_inputs, gcn_inputs, short_mask, aspect, src_mask)   
+        check_finite("attn_tensor", attn_tensor)
         attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
         multi_head_list = []
         outputs_dep = None
@@ -143,12 +159,15 @@ class GCNBert(nn.Module):
             edge = self.Wx(edge_n) 
             edge = self.gcn_drop(edge) if i < self.layers - 1 else edge 
             weight_adj=edge.permute(0,3,1,2).contiguous() 
+            check_finite("gcn_outputs_layer_{}".format(i), gcn_outputs)
+            check_finite("weight_adj_layer_{}".format(i), weight_adj)
 
 
         outputs = torch.cat(layer_list, dim=-1)
         # node_outputs=self.Wi(gcn_outputs)
         node_outputs=self.aggregate_W(outputs)
         node_outputs=F.relu(gcn_outputs)
+        check_finite("node_outputs", node_outputs)
 
         return node_outputs
 

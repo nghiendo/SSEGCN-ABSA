@@ -32,6 +32,17 @@ logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
+def check_finite(name, tensor):
+    if torch.isfinite(tensor).all():
+        return
+    finite = tensor[torch.isfinite(tensor)]
+    if finite.numel() > 0:
+        detail = "finite_min={:.6g}, finite_max={:.6g}".format(finite.min().item(), finite.max().item())
+    else:
+        detail = "no finite values"
+    raise FloatingPointError("{} contains NaN/Inf; shape={}, {}".format(name, tuple(tensor.shape), detail))
+
+
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -172,11 +183,13 @@ class Instructor:
                 optimizer.zero_grad()
                 inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
                 outputs, penal = self.model(inputs)
+                check_finite("logits at epoch {} batch {}".format(epoch, i_batch), outputs)
                 targets = sample_batched['polarity'].to(self.opt.device)
                 if self.opt.losstype is not None:
                     loss = criterion(outputs, targets) + penal
                 else:
                     loss = criterion(outputs, targets)
+                check_finite("loss at epoch {} batch {}".format(epoch, i_batch), loss)
 
                 loss.backward()
                 optimizer.step()
