@@ -83,6 +83,11 @@ class GCNBert(nn.Module):
 
         self.affine1 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
         self.affine2 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.affine1)
+        nn.init.xavier_uniform_(self.affine2)
 
     def forward(self, inputs): 
 
@@ -178,6 +183,7 @@ class MultiHeadAttention(nn.Module):
 
     def __init__(self, h, d_model, dropout=0.1):
         super(MultiHeadAttention, self).__init__()  
+        assert d_model % h == 0
         self.d_k = d_model // h  
         self.h = h    
         self.linears = clones(nn.Linear(d_model, d_model), 2)
@@ -185,6 +191,11 @@ class MultiHeadAttention(nn.Module):
         self.weight_m = nn.Parameter(torch.Tensor(self.h, self.d_k, self.d_k)) 
         self.bias_m = nn.Parameter(torch.Tensor(1))
         self.dense = nn.Linear(d_model, self.d_k)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.weight_m)
+        nn.init.zeros_(self.bias_m)
     
 
     def forward(self, query, key, short, aspect, mask=None):   
