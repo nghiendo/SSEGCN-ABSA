@@ -57,8 +57,9 @@ class Instructor:
         self.opt = opt
         if 'bert' in opt.model_name:
             tokenizer = Tokenizer4BertGCN(opt.max_length, opt.pretrained_bert_name)
-            bert = AutoModel.from_pretrained(opt.pretrained_bert_name)
+            bert = AutoModel.from_pretrained(opt.pretrained_bert_name).float()
             self.model = opt.model_class(bert, opt).to(opt.device)
+            self.model.float()
             trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt)
             testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt)
         else:    

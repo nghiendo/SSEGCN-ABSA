@@ -111,6 +111,9 @@ class GCNBert(nn.Module):
         bert_kwargs = {"attention_mask": attention_mask}
         if getattr(self.bert.config, "type_vocab_size", 0) > 0:
             bert_kwargs["token_type_ids"] = bert_segments_ids
+        check_finite("text_bert_indices.float()", text_bert_indices.float())
+        check_finite("attention_mask.float()", attention_mask.float())
+        check_finite("bert_segments_ids.float()", bert_segments_ids.float())
         outputs = self.bert(text_bert_indices, **bert_kwargs)
         sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
         check_finite("bert.last_hidden_state", sequence_output)
