@@ -25,6 +25,7 @@ except ImportError:
 from models.ssegcn import SSEGCNClassifier
 from models.ssegcn_bert import SSEGCNBertClassifier
 from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData
+from kg3_node2vec_utils import load_kg3_node_vocab, load_node2vec_embeddings
 from prepare_vocab import VocabHelp
 
 logger = logging.getLogger()
@@ -60,8 +61,16 @@ class Instructor:
             bert = AutoModel.from_pretrained(opt.pretrained_bert_name).float()
             self.model = opt.model_class(bert, opt).to(opt.device)
             self.model.float()
-            trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt)
-            testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt)
+            node2vec_embeddings = {}
+            if opt.use_node2vec:
+                index_to_node_id, _ = load_kg3_node_vocab(opt.kg3_dataset_file['train'])
+                node2vec_embeddings = load_node2vec_embeddings(
+                    opt.node2vec_file,
+                    index_to_node_id=index_to_node_id,
+                    expected_dim=opt.node2vec_dim,
+                )
+            trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt, kg3_fname=opt.kg3_dataset_file['train'], node2vec_embeddings=node2vec_embeddings)
+            testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt, kg3_fname=opt.kg3_dataset_file['test'], node2vec_embeddings=node2vec_embeddings)
         else:    
             tokenizer = build_tokenizer(
                 fnames=[opt.dataset_file['train'], opt.dataset_file['test']], 
@@ -295,12 +304,27 @@ def main():
             'test': './dataset/Tweets_corenlp/test_write.json',
         }
     }
+
+    kg3_dataset_files = {
+        'restaurant': {
+            'train': './dataset/Restaurants_corenlp/train_kg3.json',
+            'test': './dataset/Restaurants_corenlp/test_kg3.json',
+        },
+        'laptop': {
+            'train': './dataset/Laptops_corenlp/train_kg3.json',
+            'test': './dataset/Laptops_corenlp/test_kg3.json'
+        },
+        'twitter': {
+            'train': './dataset/Tweets_corenlp/train_kg3.json',
+            'test': './dataset/Tweets_corenlp/test_kg3.json',
+        }
+    }
     
     input_colses = {
  
         'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask'],
-        'ssegcn_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
+        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask', 'kg3_bert_features'],
+        'ssegcn_bert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask', 'kg3_bert_features']
     }
     
     initializers = {
@@ -369,13 +393,20 @@ def main():
     parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
+    parser.add_argument('--use_node2vec', default=False, action='store_true')
+    parser.add_argument('--node2vec_dim', default=128, type=int)
+    parser.add_argument('--node2vec_file', default=None, type=str, help='Path to pretrained Node2Vec embeddings for the selected dataset.')
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
     opt.dataset_file = dataset_files[opt.dataset]
+    opt.kg3_dataset_file = kg3_dataset_files[opt.dataset]
     opt.inputs_cols = input_colses[opt.model_name]
     opt.initializer = initializers[opt.initializer]
     opt.optimizer = optimizers[opt.optimizer]
+
+    if 'bert' in opt.model_name and opt.use_node2vec and opt.node2vec_file is None:
+        raise ValueError('--node2vec_file is required when --use_node2vec is enabled.')
 
     print("choice cuda:{}".format(opt.cuda))
     os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda

@@ -29,6 +29,15 @@ To install requirements, run `pip install -r requirements.txt`.
    `train_kg3.json`: train split with node vocab, graph edges, and per-record KG3 annotations
    `test_kg3.json`: test split filtered by the train node vocabulary to avoid leakage
 
+   To concatenate pretrained Node2Vec features into the BERT token embeddings, prepare a Node2Vec embedding file for the dataset and run training with:
+
+   `python train.py --model_name ssegcn_bert --dataset laptop --use_node2vec --node2vec_dim 128 --node2vec_file path/to/node2vec_embeddings.json`
+
+   Supported Node2Vec formats:
+   JSON mapping `node_id -> vector`
+   JSON mapping `node_index -> vector`
+   word2vec-style text file using node indices from `train_kg3.json`
+
 3. Prepare vocabulary with:
 
    `sh build_vocab.sh`

@@ -10,8 +10,13 @@ import json
 import pickle
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoTokenizer
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    AutoTokenizer = None
 from torch.utils.data import Dataset
+
+from kg3_node2vec_utils import build_kg3_feature_tensor, load_node2vec_embeddings, load_kg3_node_vocab, parse_kg3_data
 
 
 def ParseData(data_path):
@@ -345,6 +350,8 @@ def softmax(x):
 
 class Tokenizer4BertGCN:
     def __init__(self, max_seq_len, pretrained_bert_name):
+        if AutoTokenizer is None:
+            raise ImportError('transformers is required to use Tokenizer4BertGCN')
         self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_bert_name)
         self.cls_token_id = self.tokenizer.cls_token_id
@@ -356,11 +363,19 @@ class Tokenizer4BertGCN:
 
 
 class ABSAGCNData(Dataset):
-    def __init__(self, fname, tokenizer, opt):
+    def __init__(self, fname, tokenizer, opt, kg3_fname=None, node2vec_embeddings=None):
         self.data = []
         parse = ParseData
         polarity_dict = {'positive':0, 'negative':1, 'neutral':2}
-        for obj in tqdm(parse(fname), total=len(parse(fname)), desc="Training examples"):
+        parsed_data = parse(fname)
+        kg3_data = parse_kg3_data(kg3_fname) if kg3_fname is not None else None
+        if kg3_data is not None and len(kg3_data) != len(parsed_data):
+            raise ValueError('KG3 sample count mismatch: {} vs {}'.format(len(kg3_data), len(parsed_data)))
+
+        if node2vec_embeddings is None:
+            node2vec_embeddings = {}
+
+        for sample_index, obj in enumerate(tqdm(parsed_data, total=len(parsed_data), desc="Training examples")):
             polarity = polarity_dict[obj['label']]
             text = obj['text']
             term = obj['aspect']
@@ -422,6 +437,22 @@ class ABSAGCNData(Dataset):
             src_mask = np.asarray(src_mask, dtype='int64')
             aspect_mask = np.asarray(aspect_mask, dtype='int64')
 
+            if kg3_data is not None and getattr(opt, 'use_node2vec', False):
+                kg3_item = kg3_data[sample_index]
+                kg3_bert_features = build_kg3_feature_tensor(
+                    text_list=kg3_item['text_list'],
+                    aspect_node=kg3_item['kg3']['aspect_node'],
+                    tok2ori_map=tok2ori_map,
+                    term_tok2ori_map=term_tok2ori_map,
+                    context_len=context_len,
+                    term_len=len(term_tokens),
+                    max_seq_len=tokenizer.max_seq_len,
+                    node2vec_embeddings=node2vec_embeddings,
+                    node2vec_dim=opt.node2vec_dim,
+                )
+            else:
+                kg3_bert_features = np.zeros((tokenizer.max_seq_len, opt.node2vec_dim * 2), dtype='float32')
+
             row_short = obj['short']
             
             for i in range(context_len-1):
@@ -479,6 +510,7 @@ class ABSAGCNData(Dataset):
                 'asp_end': asp_end,
                 'src_mask': src_mask,
                 'aspect_mask': aspect_mask,
+                'kg3_bert_features': kg3_bert_features,
                 'polarity': polarity,
                 'short_mask': short_mask,
             }
