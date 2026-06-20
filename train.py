@@ -62,13 +62,12 @@ class Instructor:
             self.model = opt.model_class(bert, opt).to(opt.device)
             self.model.float()
             node2vec_embeddings = {}
-            if opt.use_node2vec:
-                index_to_node_id, _ = load_kg3_node_vocab(opt.kg3_dataset_file['train'])
-                node2vec_embeddings = load_node2vec_embeddings(
-                    opt.node2vec_file,
-                    index_to_node_id=index_to_node_id,
-                    expected_dim=opt.node2vec_dim,
-                )
+            index_to_node_id, _ = load_kg3_node_vocab(opt.kg3_dataset_file['train'])
+            node2vec_embeddings = load_node2vec_embeddings(
+                opt.node2vec_file,
+                index_to_node_id=index_to_node_id,
+                expected_dim=opt.node2vec_dim,
+            )
             trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt, kg3_fname=opt.kg3_dataset_file['train'], node2vec_embeddings=node2vec_embeddings)
             testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt, kg3_fname=opt.kg3_dataset_file['test'], node2vec_embeddings=node2vec_embeddings)
         else:    
@@ -399,7 +398,7 @@ def main():
     parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
-    parser.add_argument('--use_node2vec', default=False, action='store_true')
+    parser.add_argument('--use_node2vec', default=True, action='store_true')
     parser.add_argument('--node2vec_dim', default=128, type=int)
     parser.add_argument('--node2vec_file', default=None, type=str, help='Path to pretrained Node2Vec embeddings for the selected dataset.')
     opt = parser.parse_args()

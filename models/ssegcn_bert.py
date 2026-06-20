@@ -78,7 +78,7 @@ class GCNBert(nn.Module):
         self.pooled_drop = nn.Dropout(opt.bert_dropout)
         self.gcn_drop = nn.Dropout(opt.gcn_dropout)
         self.layernorm = LayerNorm(opt.bert_dim)
-        self.kg_feature_dim = opt.node2vec_dim * 2 if getattr(opt, 'use_node2vec', False) else 0
+        self.kg_feature_dim = opt.node2vec_dim * 2
 
         self.attdim = 100
         self.W = nn.Linear(self.attdim,self.attdim)
@@ -95,9 +95,8 @@ class GCNBert(nn.Module):
 
         self.affine1 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
         self.affine2 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
-        if self.kg_feature_dim > 0:
-            self.kg_fusion = nn.Linear(self.bert_dim + self.kg_feature_dim, self.bert_dim)
-            self.kg_layernorm = LayerNorm(self.bert_dim)
+        self.kg_fusion = nn.Linear(self.bert_dim + self.kg_feature_dim, self.bert_dim)
+        self.kg_layernorm = LayerNorm(self.bert_dim)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -123,12 +122,11 @@ class GCNBert(nn.Module):
         check_finite("bert.last_hidden_state", sequence_output)
         sequence_output = self.layernorm(sequence_output)
         check_finite("layernorm(sequence_output)", sequence_output)
-        if self.kg_feature_dim > 0:
-            check_finite("kg3_bert_features", kg3_bert_features)
-            sequence_output = torch.cat([sequence_output, kg3_bert_features], dim=-1)
-            sequence_output = self.kg_fusion(sequence_output)
-            sequence_output = self.kg_layernorm(sequence_output)
-            check_finite("kg_fused_sequence_output", sequence_output)
+        check_finite("kg3_bert_features", kg3_bert_features)
+        sequence_output = torch.cat([sequence_output, kg3_bert_features], dim=-1)
+        sequence_output = self.kg_fusion(sequence_output)
+        sequence_output = self.kg_layernorm(sequence_output)
+        check_finite("kg_fused_sequence_output", sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  
 
         gcn_inputs = self.Wxx(gcn_inputs)
