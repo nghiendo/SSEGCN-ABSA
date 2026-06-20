@@ -41,7 +41,8 @@ class SSEGCNBertClassifier(nn.Module):
         super().__init__()
         self.opt = opt
         self.gcn_model = GCNAbsaModel(bert, opt=opt)
-        self.classifier = nn.Linear(100, opt.polarities_dim)
+        # Classify on top of the fused GCN branch and BERT shortcut branch.
+        self.classifier = nn.Linear(200, opt.polarities_dim)
 
     def forward(self, inputs):
         outputs1 = self.gcn_model(inputs)
@@ -58,11 +59,19 @@ class GCNAbsaModel(nn.Module):
 
     def forward(self, inputs):
         text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask= inputs
-        h = self.gcn(inputs)    
+        gcn_hidden, shortcut_hidden = self.gcn(inputs)
         asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)
-        aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, 100)  
-        outputs1 = (h*aspect_mask).sum(dim=1) / asp_wn
-        return outputs1   
+
+        # Pool the GCN branch over the aspect span to keep aspect-aware structure features.
+        gcn_aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, gcn_hidden.size(-1))
+        gcn_vec = (gcn_hidden * gcn_aspect_mask).sum(dim=1) / asp_wn
+
+        # Pool the raw BERT shortcut branch over the same aspect span before fusion.
+        shortcut_aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, shortcut_hidden.size(-1))
+        shortcut_vec = (shortcut_hidden * shortcut_aspect_mask).sum(dim=1) / asp_wn
+
+        fused_outputs = torch.cat([gcn_vec, shortcut_vec], dim=-1)
+        return fused_outputs   
 
 
 class GCNBert(nn.Module):
@@ -83,6 +92,8 @@ class GCNBert(nn.Module):
         self.W = nn.Linear(self.attdim,self.attdim)
         self.Wx= nn.Linear(self.attention_heads+self.attdim*2, self.attention_heads)
         self.Wxx = nn.Linear(self.bert_dim, self.attdim)
+        # Project the BERT shortcut branch to the same size as the GCN branch for simple fusion.
+        self.shortcut_proj = nn.Linear(self.bert_dim, self.attdim)
         self.Wi = nn.Linear(self.attdim,50)
         self.aggregate_W = nn.Linear(self.attdim*2, self.attdim)  
 
@@ -119,6 +130,11 @@ class GCNBert(nn.Module):
         check_finite("bert.last_hidden_state", sequence_output)
         sequence_output = self.layernorm(sequence_output)
         check_finite("layernorm(sequence_output)", sequence_output)
+
+        # Shortcut branch keeps a less transformed BERT representation for late fusion.
+        shortcut_hidden = self.shortcut_proj(sequence_output)
+        check_finite("shortcut_proj(sequence_output)", shortcut_hidden)
+
         gcn_inputs = self.bert_drop(sequence_output)  
 
         gcn_inputs = self.Wxx(gcn_inputs)
@@ -172,7 +188,7 @@ class GCNBert(nn.Module):
         node_outputs=F.relu(gcn_outputs)
         check_finite("node_outputs", node_outputs)
 
-        return node_outputs
+        return node_outputs, shortcut_hidden
 
 
 def attention(query, key, short, aspect, weight_m, bias_m, mask=None, dropout=None):   
