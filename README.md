@@ -21,6 +21,14 @@ To install requirements, run `pip install -r requirements.txt`.
 
    `python preprocess_data.py`
 
+   To build the separate KG3 artefacts for Node2Vec-style graph features:
+
+   `python dataset/preprocess_kg3.py --dataset all`
+
+   This generates only:
+   `train_kg3.json`: train split with node vocab, graph edges, and per-record KG3 annotations
+   `test_kg3.json`: test split filtered by the train node vocabulary to avoid leakage
+
 3. Prepare vocabulary with:
 
    `sh build_vocab.sh`
