@@ -47,6 +47,17 @@ class KG3Node2VecUtilsTests(unittest.TestCase):
         finally:
             os.remove(temp_path)
 
+    def test_load_node2vec_embeddings_rejects_kg3_dataset_payload(self):
+        payload = '{"dataset": "laptop", "records": []}'
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False, encoding='utf-8') as handle:
+            handle.write(payload)
+            temp_path = handle.name
+        try:
+            with self.assertRaisesRegex(ValueError, 'Did you pass a KG3 dataset file'):
+                load_node2vec_embeddings(temp_path, expected_dim=2)
+        finally:
+            os.remove(temp_path)
+
 
 if __name__ == '__main__':
     unittest.main()

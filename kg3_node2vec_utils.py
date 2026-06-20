@@ -49,6 +49,12 @@ def load_node2vec_embeddings(embedding_path, index_to_node_id=None, expected_dim
     vectors = {}
 
     def register_vector(raw_key, values):
+        if not isinstance(values, (list, tuple)):
+            raise ValueError(
+                'Invalid Node2Vec payload for key {} in {}. Expected a numeric vector list, '
+                'but got {}. Did you pass a KG3 dataset file such as train_kg3.json instead '
+                'of a Node2Vec embedding file?'.format(raw_key, embedding_path, type(values).__name__)
+            )
         if expected_dim is not None and len(values) != expected_dim:
             raise ValueError('Node2Vec dimension mismatch for {}: expected {}, got {}'.format(raw_key, expected_dim, len(values)))
         node_id = None

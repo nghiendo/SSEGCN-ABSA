@@ -319,6 +319,12 @@ def main():
             'test': './dataset/Tweets_corenlp/test_kg3.json',
         }
     }
+
+    default_node2vec_files = {
+        'restaurant': './dataset/Restaurants_corenlp/node2vec_embeddings.json',
+        'laptop': './dataset/Laptops_corenlp/node2vec_embeddings.json',
+        'twitter': './dataset/Tweets_corenlp/node2vec_embeddings.json',
+    }
     
     input_colses = {
  
@@ -401,12 +407,20 @@ def main():
     opt.model_class = model_classes[opt.model_name]
     opt.dataset_file = dataset_files[opt.dataset]
     opt.kg3_dataset_file = kg3_dataset_files[opt.dataset]
+    opt.default_node2vec_file = default_node2vec_files[opt.dataset]
     opt.inputs_cols = input_colses[opt.model_name]
     opt.initializer = initializers[opt.initializer]
     opt.optimizer = optimizers[opt.optimizer]
 
     if 'bert' in opt.model_name and opt.use_node2vec and opt.node2vec_file is None:
-        raise ValueError('--node2vec_file is required when --use_node2vec is enabled.')
+        opt.node2vec_file = opt.default_node2vec_file
+
+    if 'bert' in opt.model_name and opt.use_node2vec and not os.path.exists(opt.node2vec_file):
+        raise FileNotFoundError(
+            'Node2Vec embedding file not found for dataset {}: {}. '
+            'Provide --node2vec_file explicitly or place the embedding file at the default path.'
+            .format(opt.dataset, opt.node2vec_file)
+        )
 
     print("choice cuda:{}".format(opt.cuda))
     os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda
