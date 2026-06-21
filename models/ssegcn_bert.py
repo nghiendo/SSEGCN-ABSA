@@ -5,6 +5,7 @@ Date: 2022-05-01 14:17:37
 '''
 import copy
 import math
+import os
 import torch
 import numpy as np
 import torch.nn as nn
@@ -34,6 +35,38 @@ class LayerNorm(nn.Module):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
         return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
+
+
+class PCATokenProjector(nn.Module):
+    def __init__(self, pca_model_path, expected_components):
+        super().__init__()
+        if not pca_model_path or not os.path.exists(pca_model_path):
+            raise FileNotFoundError(
+                'PCA model file not found: {}. Run train.py --pca_only first.'.format(pca_model_path)
+            )
+        pca_data = np.load(pca_model_path)
+        if 'components' not in pca_data or 'mean' not in pca_data:
+            raise KeyError(
+                'PCA file {} must contain "components" and "mean". Re-run train.py --pca_only to regenerate it.'.format(
+                    pca_model_path
+                )
+            )
+
+        components = torch.tensor(pca_data['components'], dtype=torch.float32)
+        mean = torch.tensor(pca_data['mean'], dtype=torch.float32)
+        if components.size(0) < expected_components:
+            raise ValueError(
+                'PCA file {} only has {} components, but {} were requested.'.format(
+                    pca_model_path, components.size(0), expected_components
+                )
+            )
+
+        self.register_buffer('components', components[:expected_components].contiguous())
+        self.register_buffer('mean', mean)
+
+    def forward(self, token_embeddings):
+        centered = token_embeddings - self.mean.view(1, 1, -1)
+        return torch.matmul(centered, self.components.transpose(0, 1))
 
 
 class SSEGCNBertClassifier(nn.Module):
@@ -71,6 +104,7 @@ class GCNBert(nn.Module):
         self.bert = bert
         self.opt = opt
         self.layers = num_layers
+        self.use_pca_bert = getattr(opt, 'use_pca_bert', False)
         self.mem_dim = opt.bert_dim // 2
         self.attention_heads = opt.attention_heads
         self.bert_dim = opt.bert_dim
@@ -78,6 +112,9 @@ class GCNBert(nn.Module):
         self.pooled_drop = nn.Dropout(opt.bert_dropout)
         self.gcn_drop = nn.Dropout(opt.gcn_dropout)
         self.layernorm = LayerNorm(opt.bert_dim)
+        self.pca_projector = None
+        if self.use_pca_bert:
+            self.pca_projector = PCATokenProjector(opt.pca_model_path, opt.pca_components)
 
         self.attdim = 100
         self.W = nn.Linear(self.attdim,self.attdim)
@@ -114,9 +151,15 @@ class GCNBert(nn.Module):
         check_finite("text_bert_indices.float()", text_bert_indices.float())
         check_finite("attention_mask.float()", attention_mask.float())
         check_finite("bert_segments_ids.float()", bert_segments_ids.float())
-        outputs = self.bert(text_bert_indices, **bert_kwargs)
-        sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
-        check_finite("bert.last_hidden_state", sequence_output)
+        if self.use_pca_bert:
+            sequence_output = self.bert.get_input_embeddings()(text_bert_indices)
+            check_finite("bert.input_embeddings", sequence_output)
+            sequence_output = self.pca_projector(sequence_output)
+            check_finite("pca_projected_embeddings", sequence_output)
+        else:
+            outputs = self.bert(text_bert_indices, **bert_kwargs)
+            sequence_output = outputs.last_hidden_state if hasattr(outputs, "last_hidden_state") else outputs[0]
+            check_finite("bert.last_hidden_state", sequence_output)
         sequence_output = self.layernorm(sequence_output)
         check_finite("layernorm(sequence_output)", sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  

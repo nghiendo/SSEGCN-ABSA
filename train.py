@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from sklearn import metrics
+from sklearn.decomposition import PCA
 from time import strftime, localtime
 from torch.utils.data import DataLoader
 from transformers import AutoModel
@@ -49,6 +50,13 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
+
+
+def resolve_pca_model_path(opt):
+    configured_path = getattr(opt, 'pca_model_path', None)
+    if configured_path:
+        return configured_path
+    return os.path.join(opt.pca_output_dir, opt.model_name, opt.dataset, 'train.npz')
 
 
 class Instructor:
@@ -95,6 +103,9 @@ class Instructor:
         if opt.device.type == 'cuda' and torch.cuda.is_available():
             logger.info('cuda memory allocated: {}'.format(torch.cuda.memory_allocated()))
         self._print_args()
+
+    def _get_bert_backbone(self):
+        return self.model.gcn_model.gcn.bert
     
     def _print_args(self):
         n_trainable_params, n_nontrainable_params = 0, 0
@@ -246,9 +257,81 @@ class Instructor:
         logger.info(test_report)
         logger.info("Confusion Matrix...")
         logger.info(test_confusion)
-        
+
+    def _collect_bert_input_vectors(self, dataloader):
+        bert = self._get_bert_backbone()
+        embedding_layer = bert.get_input_embeddings()
+        pooled_vectors, labels = [], []
+
+        self.model.eval()
+        with torch.no_grad():
+            for sample_batched in dataloader:
+                input_ids = sample_batched['text_bert_indices'].to(self.opt.device)
+                attention_mask = sample_batched['attention_mask'].to(self.opt.device).unsqueeze(-1).float()
+                token_embeddings = embedding_layer(input_ids)
+                masked_embeddings = token_embeddings * attention_mask
+                valid_token_count = attention_mask.sum(dim=1).clamp(min=1.0)
+                pooled_batch = masked_embeddings.sum(dim=1) / valid_token_count
+                pooled_vectors.append(pooled_batch.cpu().numpy())
+                labels.append(sample_batched['polarity'].numpy())
+
+        if not pooled_vectors:
+            raise RuntimeError('No BERT input vectors were collected for PCA.')
+
+        return np.concatenate(pooled_vectors, axis=0), np.concatenate(labels, axis=0)
+
+    def _save_pca_outputs(self, split_name, vectors, labels, reduced_vectors, pca_model):
+        output_dir = os.path.join(self.opt.pca_output_dir, self.opt.model_name, self.opt.dataset)
+        os.makedirs(output_dir, exist_ok=True)
+        base_path = os.path.join(output_dir, split_name)
+        np.savez(
+            base_path + '.npz',
+            vectors=vectors,
+            labels=labels,
+            reduced_vectors=reduced_vectors,
+            explained_variance_ratio=pca_model.explained_variance_ratio_,
+            singular_values=pca_model.singular_values_,
+            components=pca_model.components_,
+            mean=pca_model.mean_,
+        )
+
+        header = 'label,' + ','.join('pc{}'.format(i + 1) for i in range(reduced_vectors.shape[1]))
+        csv_rows = np.column_stack((labels, reduced_vectors))
+        np.savetxt(base_path + '.csv', csv_rows, delimiter=',', header=header, comments='')
+        logger.info('saved PCA outputs for %s to %s.[npz|csv]', split_name, base_path)
+        logger.info('explained variance ratio (%s): %s', split_name, pca_model.explained_variance_ratio_)
+
+    def run_pca(self):
+        if 'bert' not in self.opt.model_name:
+            raise ValueError('PCA on BERT input vectors requires a BERT-based model.')
+
+        split_to_loader = {
+            'train': self.train_dataloader,
+            'test': self.test_dataloader,
+        }
+        selected_splits = ['train', 'test'] if self.opt.pca_split == 'both' else [self.opt.pca_split]
+
+        for split_name in selected_splits:
+            vectors, labels = self._collect_bert_input_vectors(split_to_loader[split_name])
+            n_samples, n_features = vectors.shape
+            n_components = min(self.opt.pca_components, n_samples, n_features)
+            if n_components < 1:
+                raise ValueError('Invalid PCA component count: {}'.format(n_components))
+
+            pca = PCA(n_components=n_components, random_state=self.opt.seed)
+            reduced_vectors = pca.fit_transform(vectors)
+            logger.info(
+                'PCA completed for %s: samples=%d, input_dim=%d, output_dim=%d',
+                split_name, n_samples, n_features, n_components
+            )
+            self._save_pca_outputs(split_name, vectors, labels, reduced_vectors, pca)
+
     
     def run(self):
+        if self.opt.pca_only:
+            self.run_pca()
+            return
+
         criterion = nn.CrossEntropyLoss()
         if 'bert' not in self.opt.model_name:
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
@@ -369,6 +452,10 @@ def main():
     parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
+    parser.add_argument('--pca_only', action='store_true', help='Skip training and run PCA on pooled BERT input embeddings.')
+    parser.add_argument('--pca_components', default=2, type=int, help='Number of PCA components to keep.')
+    parser.add_argument('--pca_split', default='train', choices=['train', 'test', 'both'], help='Dataset split used for PCA.')
+    parser.add_argument('--pca_output_dir', default='./pca_outputs', type=str, help='Directory to save PCA outputs.')
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
@@ -376,6 +463,10 @@ def main():
     opt.inputs_cols = input_colses[opt.model_name]
     opt.initializer = initializers[opt.initializer]
     opt.optimizer = optimizers[opt.optimizer]
+    opt.pca_model_path = resolve_pca_model_path(opt)
+    opt.use_pca_bert = 'bert' in opt.model_name and not opt.pca_only
+    if opt.use_pca_bert:
+        opt.bert_dim = opt.pca_components
 
     print("choice cuda:{}".format(opt.cuda))
     os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda
@@ -386,7 +477,7 @@ def main():
 
     if not os.path.exists('./log'):
         os.makedirs('./log', mode=0o777)
-    log_file = '{}-{}-{}.log'.format(opt.model_name, opt.dataset, strftime("%Y-%m-%d_%H:%M:%S", localtime()))
+    log_file = '{}-{}-{}.log'.format(opt.model_name, opt.dataset, strftime("%Y-%m-%d_%H-%M-%S", localtime()))
     logger.addHandler(logging.FileHandler("%s/%s" % ('./log', log_file)))
 
     ins = Instructor(opt)
