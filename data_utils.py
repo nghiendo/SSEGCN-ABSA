@@ -489,3 +489,22 @@ class ABSAGCNData(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+
+class KDABSADataset(Dataset):
+    def __init__(self, sentence_dataset, bert_dataset):
+        if len(sentence_dataset) != len(bert_dataset):
+            raise ValueError('SentenceDataset and ABSAGCNData must have the same length for distillation.')
+
+        self.data = []
+        for idx in range(len(sentence_dataset)):
+            merged = {}
+            merged.update(sentence_dataset[idx])
+            merged.update(bert_dataset[idx])
+            self.data.append(merged)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]

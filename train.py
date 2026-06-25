@@ -12,6 +12,7 @@ import logging
 import argparse
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from sklearn import metrics
 from time import strftime, localtime
@@ -24,12 +25,19 @@ except ImportError:
 
 from models.ssegcn import SSEGCNClassifier
 from models.ssegcn_bert import SSEGCNBertClassifier
-from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData
+from models.ssegcn_student import SSEGCNStudentClassifier
+from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData, KDABSADataset
 from prepare_vocab import VocabHelp
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler(sys.stdout))
+
+INPUT_COLSES = {
+    'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length', 'short_mask'],
+    'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask', 'short_mask'],
+    'ssegcnbertstudent': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length', 'short_mask'],
+}
 
 
 def setup_seed(seed):
@@ -44,7 +52,14 @@ class Instructor:
     ''' Model training and evaluation '''
     def __init__(self, opt):
         self.opt = opt
-        if 'bert' in opt.model_name:
+        self.best_model = None
+        self.teacher_model = None
+        self.student_input_cols = None
+        self.teacher_input_cols = None
+
+        if opt.model_name == 'ssegcnbertstudent':
+            self._build_student_kd_pipeline()
+        elif 'bert' in opt.model_name:
             tokenizer = Tokenizer4BertGCN(opt.max_length, opt.pretrained_bert_name)
             bert = BertModel.from_pretrained(opt.pretrained_bert_name)
             self.model = opt.model_class(bert, opt).to(opt.device)
@@ -77,12 +92,70 @@ class Instructor:
             trainset = SentenceDataset(opt.dataset_file['train'], tokenizer, opt=opt, vocab_help=vocab_help)
             testset = SentenceDataset(opt.dataset_file['test'], tokenizer, opt=opt, vocab_help=vocab_help)
 
-        self.train_dataloader = DataLoader(dataset=trainset, batch_size=opt.batch_size, shuffle=True)
-        self.test_dataloader = DataLoader(dataset=testset, batch_size=opt.batch_size)
+        if opt.model_name != 'ssegcnbertstudent':
+            self.train_dataloader = DataLoader(dataset=trainset, batch_size=opt.batch_size, shuffle=True)
+            self.test_dataloader = DataLoader(dataset=testset, batch_size=opt.batch_size)
 
         if opt.device.type == 'cuda' and torch.cuda.is_available():
             logger.info('cuda memory allocated: {}'.format(torch.cuda.memory_allocated()))
         self._print_args()
+
+    def _load_word_side_resources(self):
+        tokenizer = build_tokenizer(
+            fnames=[self.opt.dataset_file['train'], self.opt.dataset_file['test']],
+            max_length=self.opt.max_length,
+            data_file='{}/{}_tokenizer.dat'.format(self.opt.vocab_dir, self.opt.dataset))
+        embedding_matrix = build_embedding_matrix(
+            vocab=tokenizer.vocab,
+            embed_dim=self.opt.embed_dim,
+            data_file='{}/{}d_{}_embedding_matrix.dat'.format(self.opt.vocab_dir, str(self.opt.embed_dim), self.opt.dataset))
+
+        logger.info("Loading vocab...")
+        token_vocab = VocabHelp.load_vocab(self.opt.vocab_dir + '/vocab_tok.vocab')
+        post_vocab = VocabHelp.load_vocab(self.opt.vocab_dir + '/vocab_post.vocab')
+        pos_vocab = VocabHelp.load_vocab(self.opt.vocab_dir + '/vocab_pos.vocab')
+        dep_vocab = VocabHelp.load_vocab(self.opt.vocab_dir + '/vocab_dep.vocab')
+        pol_vocab = VocabHelp.load_vocab(self.opt.vocab_dir + '/vocab_pol.vocab')
+        logger.info("token_vocab: {}, post_vocab: {}, pos_vocab: {}, dep_vocab: {}, pol_vocab: {}".format(
+            len(token_vocab), len(post_vocab), len(pos_vocab), len(dep_vocab), len(pol_vocab)))
+
+        self.opt.post_size = len(post_vocab)
+        self.opt.pos_size = len(pos_vocab)
+        vocab_help = (post_vocab, pos_vocab, dep_vocab, pol_vocab)
+        return tokenizer, embedding_matrix, vocab_help
+
+    def _build_student_kd_pipeline(self):
+        word_tokenizer, embedding_matrix, vocab_help = self._load_word_side_resources()
+        bert_tokenizer = Tokenizer4BertGCN(self.opt.max_length, self.opt.pretrained_bert_name)
+
+        self.model = self.opt.model_class(embedding_matrix, self.opt).to(self.opt.device)
+
+        train_sentence = SentenceDataset(self.opt.dataset_file['train'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
+        test_sentence = SentenceDataset(self.opt.dataset_file['test'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
+        train_bert = ABSAGCNData(self.opt.dataset_file['train'], bert_tokenizer, opt=self.opt)
+        test_bert = ABSAGCNData(self.opt.dataset_file['test'], bert_tokenizer, opt=self.opt)
+
+        trainset = KDABSADataset(train_sentence, train_bert)
+        testset = KDABSADataset(test_sentence, test_bert)
+        self.train_dataloader = DataLoader(dataset=trainset, batch_size=self.opt.batch_size, shuffle=True)
+        self.test_dataloader = DataLoader(dataset=testset, batch_size=self.opt.batch_size)
+
+        self.student_input_cols = INPUT_COLSES['ssegcn']
+        self.teacher_input_cols = INPUT_COLSES['ssegcnbert']
+        self._load_teacher_model()
+
+    def _load_teacher_model(self):
+        if not self.opt.teacher_path:
+            raise ValueError('--teacher_path is required when model_name=ssegcnbertstudent')
+
+        bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
+        teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
+        state_dict = torch.load(self.opt.teacher_path, map_location=self.opt.device)
+        teacher.load_state_dict(state_dict, strict=True)
+        teacher.eval()
+        for param in teacher.parameters():
+            param.requires_grad = False
+        self.teacher_model = teacher
     
     def _print_args(self):
         n_trainable_params, n_nontrainable_params = 0, 0
@@ -155,6 +228,86 @@ class Instructor:
 
         return optimizer
 
+    def _kd_loss(self, student_logits, student_features, teacher_logits, temperature):
+        soft_targets = F.softmax(teacher_logits / temperature, dim=-1)
+        student_log_probs = F.log_softmax(student_logits / temperature, dim=-1)
+        kd_logits_loss = F.kl_div(student_log_probs, soft_targets, reduction='batchmean') * (temperature ** 2)
+
+        with torch.no_grad():
+            teacher_probs = F.softmax(teacher_logits, dim=-1)
+        feature_target = teacher_probs @ self.teacher_model.classifier.weight
+        kd_feature_loss = F.mse_loss(student_features, feature_target)
+        return kd_logits_loss, kd_feature_loss
+
+    def _train_kd(self, criterion, optimizer, max_test_acc_overall=0):
+        max_test_acc = 0
+        max_f1 = 0
+        global_step = 0
+        model_path = ''
+        for epoch in range(self.opt.num_epoch):
+            logger.info('>' * 60)
+            logger.info('epoch: {}'.format(epoch))
+            n_correct, n_total = 0, 0
+            for i_batch, sample_batched in enumerate(self.train_dataloader):
+                global_step += 1
+                self.model.train()
+                optimizer.zero_grad()
+
+                student_inputs = [sample_batched[col].to(self.opt.device) for col in self.student_input_cols]
+                teacher_inputs = [sample_batched[col].to(self.opt.device) for col in self.teacher_input_cols]
+                targets = sample_batched['polarity'].to(self.opt.device)
+
+                student_features = self.model.encode(student_inputs)
+                projected_features = self.model.project_for_distill(student_features)
+                student_logits = self.model.classifier(student_features)
+
+                with torch.no_grad():
+                    teacher_logits, _ = self.teacher_model(teacher_inputs)
+
+                hard_loss = criterion(student_logits, targets)
+                kd_logits_loss, kd_feature_loss = self._kd_loss(
+                    student_logits,
+                    projected_features,
+                    teacher_logits,
+                    self.opt.kd_temperature,
+                )
+                loss = (
+                    self.opt.kd_alpha * hard_loss
+                    + self.opt.kd_beta * kd_logits_loss
+                    + self.opt.kd_gamma * kd_feature_loss
+                )
+
+                loss.backward()
+                optimizer.step()
+
+                if global_step % self.opt.log_step == 0:
+                    n_correct += (torch.argmax(student_logits, -1) == targets).sum().item()
+                    n_total += len(student_logits)
+                    train_acc = n_correct / n_total
+                    test_acc, f1 = self._evaluate()
+                    if test_acc > max_test_acc:
+                        max_test_acc = test_acc
+                        if test_acc > max_test_acc_overall:
+                            os.makedirs('./state_dict', exist_ok=True)
+                            model_path = './state_dict/{}_{}_acc_{:.4f}_f1_{:.4f}'.format(
+                                self.opt.model_name, self.opt.dataset, test_acc, f1)
+                            self.best_model = copy.deepcopy(self.model)
+                            logger.info('>> saved: {}'.format(model_path))
+                    if f1 > max_f1:
+                        max_f1 = f1
+                    logger.info(
+                        'loss: {:.4f}, hard: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
+                            loss.item(),
+                            hard_loss.item(),
+                            kd_logits_loss.item(),
+                            kd_feature_loss.item(),
+                            train_acc,
+                            test_acc,
+                            f1,
+                        )
+                    )
+        return max_test_acc, max_f1, model_path
+
     
     def _train(self, criterion, optimizer, max_test_acc_overall=0):
         max_test_acc = 0
@@ -205,7 +358,8 @@ class Instructor:
         targets_all, outputs_all = None, None
         with torch.no_grad():
             for batch, sample_batched in enumerate(self.test_dataloader):
-                inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
+                input_cols = self.student_input_cols if self.opt.model_name == 'ssegcnbertstudent' else self.opt.inputs_cols
+                inputs = [sample_batched[col].to(self.opt.device) for col in input_cols]
                 targets = sample_batched['polarity'].to(self.opt.device)
                 outputs, penal = self.model(inputs)
                 n_test_correct += (torch.argmax(outputs, -1) == targets).sum().item()
@@ -225,6 +379,8 @@ class Instructor:
         return test_acc, f1
 
     def _test(self):
+        if self.best_model is None:
+            self.best_model = copy.deepcopy(self.model)
         self.model = self.best_model
         self.model.eval()
         test_report, test_confusion, acc, f1 = self._evaluate(show_results=True)
@@ -236,7 +392,10 @@ class Instructor:
     
     def run(self):
         criterion = nn.CrossEntropyLoss()
-        if 'bert' not in self.opt.model_name:
+        if self.opt.model_name == 'ssegcnbertstudent':
+            _params = filter(lambda p: p.requires_grad, self.model.parameters())
+            optimizer = self.opt.optimizer(_params, lr=self.opt.student_lr, weight_decay=self.opt.l2reg)
+        elif 'bert' not in self.opt.model_name:
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
             optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
         else:
@@ -244,9 +403,14 @@ class Instructor:
         max_test_acc_overall = 0
         max_f1_overall = 0
         model_path = ''  # Initialize model_path
-        if 'bert' not in self.opt.model_name:
+        if self.opt.model_name == 'ssegcnbertstudent':
             self._reset_params()
-        max_test_acc, max_f1, model_path = self._train(criterion, optimizer, max_test_acc_overall)
+            max_test_acc, max_f1, model_path = self._train_kd(criterion, optimizer, max_test_acc_overall)
+        elif 'bert' not in self.opt.model_name:
+            self._reset_params()
+            max_test_acc, max_f1, model_path = self._train(criterion, optimizer, max_test_acc_overall)
+        else:
+            max_test_acc, max_f1, model_path = self._train(criterion, optimizer, max_test_acc_overall)
         logger.info('max_test_acc: {0}, max_f1: {1}'.format(max_test_acc, max_f1))
         max_test_acc_overall = max(max_test_acc, max_test_acc_overall)
         max_f1_overall = max(max_f1, max_f1_overall)
@@ -263,6 +427,7 @@ def main():
     model_classes = {
         'ssegcn': SSEGCNClassifier,
         'ssegcnbert': SSEGCNBertClassifier,
+        'ssegcnbertstudent': SSEGCNStudentClassifier,
 
     }
     
@@ -279,12 +444,6 @@ def main():
             'train': './dataset/Tweets_corenlp/train_write.json',
             'test': './dataset/Tweets_corenlp/test_write.json',
         }
-    }
-    
-    input_colses = {
- 
-        'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length','short_mask'],
-        'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask','short_mask']
     }
     
     initializers = {
@@ -353,11 +512,24 @@ def main():
     parser.add_argument('--bert_dropout', type=float, default=0.3, help='BERT dropout rate.')
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
+    parser.add_argument('--teacher_path', default=None, type=str)
+    parser.add_argument('--teacher_feature_dim', default=100, type=int)
+    parser.add_argument('--kd_temperature', default=4.0, type=float)
+    parser.add_argument('--kd_alpha', default=0.4, type=float)
+    parser.add_argument('--kd_beta', default=0.4, type=float)
+    parser.add_argument('--kd_gamma', default=0.2, type=float)
+    parser.add_argument('--student_hidden_dim', default=32, type=int)
+    parser.add_argument('--student_pos_dim', default=8, type=int)
+    parser.add_argument('--student_post_dim', default=8, type=int)
+    parser.add_argument('--student_input_dropout', default=0.2, type=float)
+    parser.add_argument('--student_output_dropout', default=0.2, type=float)
+    parser.add_argument('--student_lr', default=1e-3, type=float)
+    parser.add_argument('--student_freeze_word_emb', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
     opt.dataset_file = dataset_files[opt.dataset]
-    opt.inputs_cols = input_colses[opt.model_name]
+    opt.inputs_cols = INPUT_COLSES[opt.model_name]
     opt.initializer = initializers[opt.initializer]
     opt.optimizer = optimizers[opt.optimizer]
 
