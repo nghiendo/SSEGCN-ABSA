@@ -10,6 +10,7 @@ import copy
 import random
 import logging
 import argparse
+import glob
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -145,17 +146,33 @@ class Instructor:
         self._load_teacher_model()
 
     def _load_teacher_model(self):
-        if not self.opt.teacher_path:
-            raise ValueError('--teacher_path is required when model_name=ssegcnbertstudent')
+        teacher_path = self.opt.teacher_path
+        if not teacher_path or str(teacher_path).lower() in ('auto', 'latest'):
+            teacher_path = self._find_latest_teacher_checkpoint()
+        if not teacher_path:
+            raise ValueError(
+                'No teacher checkpoint found. Train ssegcnbert first or pass --teacher_path explicitly.'
+            )
 
         bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
         teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
-        state_dict = torch.load(self.opt.teacher_path, map_location=self.opt.device)
+        logger.info('Loading teacher checkpoint: {}'.format(teacher_path))
+        state_dict = torch.load(teacher_path, map_location=self.opt.device)
         teacher.load_state_dict(state_dict, strict=True)
         teacher.eval()
         for param in teacher.parameters():
             param.requires_grad = False
         self.teacher_model = teacher
+
+    def _find_latest_teacher_checkpoint(self):
+        pattern = os.path.join(
+            '.', 'state_dict', 'ssegcnbert_{}_acc_*_f1_*'.format(self.opt.dataset)
+        )
+        candidates = glob.glob(pattern)
+        if not candidates:
+            return None
+        candidates.sort(key=os.path.getmtime, reverse=True)
+        return candidates[0]
     
     def _print_args(self):
         n_trainable_params, n_nontrainable_params = 0, 0
