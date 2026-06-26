@@ -465,7 +465,16 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7078`
    - Conclusion: for the shallow BERT student, logit-only KD is much better than pooled feature matching at this stage, and the student is now very close to the teacher's macro F1 while already exceeding the teacher's accuracy.
 
+56. `e1fa9b3` `exp56: add shallow bert tinybert-lite kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_tinybertlite_short.sh`
+   - Config delta: fix token-level KD support for `ssegcnbertshallow`, continue from the `exp55` best checkpoint, keep the strong logit-KD backbone, and add very light TinyBERT-style token hidden/relation distillation (`kd_token_hidden_weight=0.03`, `kd_token_relation_weight=0.01`) with a slightly lower BERT LR
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7595_f1_0.7100`
+     - Best observed accuracy during training/final selection: `acc=0.7595`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7100`
+   - Conclusion: light token-level distillation is helpful but only marginally so; it improves on the prior best (`0.7100` vs `0.7078`) and sets a new student peak, yet still remains just below the teacher's `0.7161` macro F1.
+
 Current best experiment:
-- Commit: `4216c4d`
-- Script: `experiments/run_kd_laptop_shallowbert6_last_logits_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7484_f1_0.7078`
+- Commit: `e1fa9b3`
+- Script: `experiments/run_kd_laptop_shallowbert6_tinybertlite_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7595_f1_0.7100`
