@@ -58,7 +58,7 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.6551`, `macro_f1=0.5439`
      - Conclusion: DIST alone is materially weaker than the exp4 recipe here.
 
-7. `TBD` `exp7: add contrastive representation distillation`
+7. `f51e0ea` `exp7: add contrastive representation distillation`
    - Script: `experiments/run_kd_laptop_contrastive.sh`
    - Config delta: keep exp4 recipe and add `--kd_contrastive_weight 0.05`
    - Result:
@@ -66,7 +66,7 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5396`, `macro_f1=0.2534`
      - Conclusion: the contrastive term is far too strong for this small student in the current feature space.
 
-8. `TBD` `exp8: add margin distillation`
+8. `f51e0ea` `exp8: add margin distillation`
    - Script: `experiments/run_kd_laptop_margin.sh`
    - Config delta: keep exp4 recipe and add `--kd_margin_weight 0.05`
    - Result:
@@ -74,7 +74,7 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5332`, `macro_f1=0.2319`
      - Conclusion: direct margin matching at this weight overwhelms the supervised signal.
 
-9. `TBD` `exp9: add rank distillation`
+9. `f51e0ea` `exp9: add rank distillation`
    - Script: `experiments/run_kd_laptop_rank.sh`
    - Config delta: keep exp4 recipe and add a light pairwise ranking term `--kd_rank_weight 0.01`
    - Result:
@@ -82,7 +82,7 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5332`, `macro_f1=0.2319`
      - Conclusion: even a light rank regularizer destabilizes this student when added from epoch 0.
 
-10. `TBD` `exp10: add relational knowledge distillation`
+10. `f51e0ea` `exp10: add relational knowledge distillation`
    - Script: `experiments/run_kd_laptop_rkd.sh`
    - Config delta: keep exp4 recipe and add a very light RKD term `--kd_relation_weight 0.005`
    - Result:
@@ -90,7 +90,7 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5459`, `macro_f1=0.2767`
      - Conclusion: RKD is less catastrophic than contrastive/margin, but still far below the exp4 baseline.
 
-11. `TBD` `exp11: add prototype class distillation`
+11. `f51e0ea` `exp11: add prototype class distillation`
    - Script: `experiments/run_kd_laptop_proto.sh`
    - Config delta: keep exp4 recipe and add soft class-prototype alignment plus prototype-relation matching
    - Result:
