@@ -584,6 +584,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7360`
    - Conclusion: this balanced DIST variant successfully reproduces the current best student but does not improve on it; the `exp64` recipe remains the strongest known checkpoint, and the search region around it appears very flat.
 
+69. `eaebb87` `exp69: recreate local restaurant teacher baseline`
+   - Script: `experiments/run_teacher_restaurant_short.sh`
+   - Config delta: regenerate `dataset/Restaurants_corenlp/train_write.json` so the restaurant train split matches the full 1980 examples again, then run the local one-epoch `ssegcnbert` teacher recipe directly on that repaired dataset to produce a distillation teacher without spending cycles on a stronger paper-style teacher rebuild
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbert_restaurant_acc_0.8365_f1_0.7439`
+     - Best observed accuracy during training/final selection: `acc=0.8365`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7439`
+   - Conclusion: the repaired local restaurant teacher is now reproducible and ready for cross-dataset validation of the `exp64` DIST recipe; its headline metrics remain below the earlier paper-level teacher numbers, but it satisfies the current constraint to distill directly from the available local teacher.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
