@@ -492,7 +492,25 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7260`
    - Conclusion: this continuation finally surpasses the teacher on macro F1 (`0.7260` vs `0.7161`) while also lifting accuracy to `0.7658`; the shallow BERT student now beats the teacher on the primary F1 metric, though it still trails slightly on accuracy.
 
+59. `b2e9d76` `exp59: push shallow bert hard-target balance`
+   - Script: `experiments/run_kd_laptop_shallowbert6_hiddenonly_accuracy_push_short.sh`
+   - Config delta: continue from the `exp58` best checkpoint, lower the BERT LR again, increase hard-target emphasis (`kd_alpha=0.66`), reduce logit KD weight slightly, and lighten the token-hidden term a bit to bias toward accuracy recovery
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7658_f1_0.7275`
+     - Best observed accuracy during training: `acc=0.7674`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7275`
+   - Conclusion: shifting slightly toward the hard labels improves macro F1 again and nudges the best observed student accuracy upward, but still does not overtake the teacher's `0.7722` accuracy.
+
+60. `75d896e` `exp60: edge shallow bert toward hard labels`
+   - Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge_short.sh`
+   - Config delta: continue from the `exp59` best checkpoint, push further toward hard-label fitting (`kd_alpha=0.70`, `kd_beta=0.25`), reduce token-hidden KD to a very light regularizer, and lower the BERT LR once more
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7674_f1_0.7278`
+     - Best observed accuracy during training/final selection: `acc=0.7674`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7278`
+   - Conclusion: the student keeps improving on both headline metrics versus the previous best and remains clearly above the teacher on macro F1, but the remaining accuracy gap persists even under stronger hard-label pressure.
+
 Current best experiment:
-- Commit: `7a51aed`
-- Script: `experiments/run_kd_laptop_shallowbert6_hiddenonly_polish_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7658_f1_0.7260`
+- Commit: `75d896e`
+- Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7674_f1_0.7278`
