@@ -143,8 +143,24 @@ class Instructor:
         self.test_dataloader = DataLoader(dataset=testset, batch_size=self.opt.batch_size)
 
         self.student_input_cols = INPUT_COLSES['ssegcn']
-        self.teacher_input_cols = INPUT_COLSES['ssegcnbert']
         self._load_teacher_model()
+
+    def _load_state_dict_compat(self, model, state_dict, model_label):
+        model_state = model.state_dict()
+        compatible = {}
+        skipped = []
+        for key, value in state_dict.items():
+            if key in model_state and model_state[key].shape == value.shape:
+                compatible[key] = value
+            else:
+                skipped.append(key)
+
+        missing = [key for key in model_state.keys() if key not in compatible]
+        model.load_state_dict(compatible, strict=False)
+        if skipped:
+            logger.info('{} skipped incompatible keys: {}'.format(model_label, skipped))
+        if missing:
+            logger.info('{} missing keys after partial load: {}'.format(model_label, missing))
 
     def _maybe_load_student_checkpoint(self):
         init_path = self.opt.student_init_path
@@ -153,7 +169,15 @@ class Instructor:
 
         logger.info('Loading student checkpoint: {}'.format(init_path))
         state_dict = torch.load(init_path, map_location=self.opt.device)
-        self.model.load_state_dict(state_dict, strict=True)
+        self._load_state_dict_compat(self.model, state_dict, 'student')
+
+    def _resolve_teacher_model_name(self, teacher_path):
+        requested = self.opt.teacher_model_name
+        if requested != 'auto':
+            return requested
+        if teacher_path and 'ssegcnbertstudent' in os.path.basename(teacher_path):
+            return 'ssegcnbertstudent'
+        return 'ssegcnbert'
 
     def _load_teacher_model(self):
         teacher_path = self.opt.teacher_path
@@ -164,11 +188,21 @@ class Instructor:
                 'No teacher checkpoint found. Train ssegcnbert first or pass --teacher_path explicitly.'
             )
 
-        bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
-        teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
+        teacher_model_name = self._resolve_teacher_model_name(teacher_path)
+        if teacher_model_name == 'ssegcnbertstudent':
+            _, embedding_matrix, _ = self._load_word_side_resources()
+            teacher = SSEGCNStudentClassifier(embedding_matrix, self.opt).to(self.opt.device)
+            self.teacher_input_cols = INPUT_COLSES['ssegcn']
+        else:
+            bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
+            teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
+            self.teacher_input_cols = INPUT_COLSES['ssegcnbert']
         logger.info('Loading teacher checkpoint: {}'.format(teacher_path))
         state_dict = torch.load(teacher_path, map_location=self.opt.device)
-        teacher.load_state_dict(state_dict, strict=True)
+        if teacher_model_name == 'ssegcnbertstudent':
+            self._load_state_dict_compat(teacher, state_dict, 'teacher')
+        else:
+            teacher.load_state_dict(state_dict, strict=True)
         teacher.eval()
         for param in teacher.parameters():
             param.requires_grad = False
@@ -998,6 +1032,7 @@ def main():
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
     parser.add_argument('--teacher_path', default=None, type=str)
+    parser.add_argument('--teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
     parser.add_argument('--teacher_feature_dim', default=100, type=int)
     parser.add_argument('--kd_temperature', default=4.0, type=float)
     parser.add_argument('--kd_temperature_schedule', default='constant', type=str, choices=['constant', 'linear', 'cosine'])
