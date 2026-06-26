@@ -521,6 +521,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7317`
    - Conclusion: the local hard-label polish still had headroom; the student now comes within `0.0016` accuracy of the teacher while extending its macro-F1 lead further.
 
+62. `5058a92` `exp62: probe shallow bert accuracy margin`
+   - Script: `experiments/run_kd_laptop_shallowbert6_accuracy_margin_short.sh`
+   - Config delta: continue from the `exp61` best checkpoint, ease hard-label pressure slightly (`kd_alpha=0.74`, `kd_beta=0.21`), reduce the token-hidden regularizer to `0.01`, and raise the BERT LR a bit to test whether a slightly softer continuation can recover the last accuracy gap without giving up the student F1 edge
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7302`
+     - Best observed accuracy during training/final selection: `acc=0.7706`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7302`
+   - Conclusion: softening this local continuation does not improve on `exp61`; it matches the same best observed accuracy but loses macro F1, so the strongest branch remains the harder-label `exp61` checkpoint.
+
 Current best experiment:
 - Commit: `9764e9f`
 - Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge2_short.sh`
