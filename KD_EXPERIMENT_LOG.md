@@ -204,6 +204,22 @@ Experiments:
      - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6306`
      - Conclusion: a conservative stage-3 polish pass did not improve on the confidence-gated stage-2 checkpoint.
 
+25. `e437850` `exp25: add uncertainty-gated dual teacher rerun`
+   - Script: `experiments/run_kd_laptop_dual_teacher_uncertainty_stage2_short.sh`
+   - Config delta: continue from the current best checkpoint and gate the aux-teacher contribution by the BERT teacher's predictive uncertainty
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6772`, `macro_f1=0.6296`
+     - Conclusion: uncertainty gating is weaker than the earlier confidence-gated blend on this dataset.
+
+26. `b694f84` `exp26: add short stage4 born-again distillation`
+   - Script: `experiments/run_kd_laptop_ban_stage4_short.sh`
+   - Config delta: self-distill directly from the current best student teacher with a low-LR one-epoch born-again pass
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6772`, `macro_f1=0.6254`
+     - Conclusion: stage-4 self-distillation underperforms here, largely because the student-teacher feature projection path is too disruptive even with light weighting.
+
 Current best experiment:
 - Commit: `d50d299`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
