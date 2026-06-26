@@ -418,6 +418,29 @@ class Instructor:
             return self._weighted_mean(per_sample, sample_weights)
         return per_sample.mean()
 
+    def _prototype_kd_loss(self, student_features, teacher_features, teacher_logits):
+        teacher_probs = F.softmax(teacher_logits / self.opt.kd_temperature, dim=-1).detach()
+
+        student_proto, teacher_proto = [], []
+        for class_idx in range(teacher_probs.size(1)):
+            class_weight = teacher_probs[:, class_idx:class_idx + 1]
+            normalizer = class_weight.sum().clamp_min(1e-6)
+            student_proto.append((student_features * class_weight).sum(dim=0) / normalizer)
+            teacher_proto.append((teacher_features * class_weight).sum(dim=0) / normalizer)
+
+        student_proto = torch.stack(student_proto, dim=0)
+        teacher_proto = torch.stack(teacher_proto, dim=0)
+
+        proto_align = F.mse_loss(student_proto, teacher_proto)
+        student_rel = torch.matmul(F.normalize(student_proto, p=2, dim=-1), F.normalize(student_proto, p=2, dim=-1).transpose(0, 1))
+        teacher_rel = torch.matmul(F.normalize(teacher_proto, p=2, dim=-1), F.normalize(teacher_proto, p=2, dim=-1).transpose(0, 1))
+        proto_relation = F.mse_loss(student_rel, teacher_rel)
+        total = (
+            self.opt.kd_proto_weight * proto_align
+            + self.opt.kd_proto_relation_weight * proto_relation
+        )
+        return total, proto_align, proto_relation
+
     def _get_feature_target(self, teacher_logits, teacher_features):
         if self.opt.kd_feature_mode == 'teacher_hidden':
             return teacher_features
@@ -502,6 +525,16 @@ class Instructor:
                 sample_weights,
             )
 
+        kd_proto_loss = kd_feature_loss.new_tensor(0.0)
+        kd_proto_align = kd_feature_loss.new_tensor(0.0)
+        kd_proto_relation = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_proto_weight > 0 or self.opt.kd_proto_relation_weight > 0:
+            kd_proto_loss, kd_proto_align, kd_proto_relation = self._prototype_kd_loss(
+                student_features=student_features,
+                teacher_features=feature_target,
+                teacher_logits=teacher_logits,
+            )
+
         total_loss = (
             self.opt.kd_beta * kd_logits_loss
             + self.opt.kd_gamma * kd_feature_loss
@@ -511,6 +544,7 @@ class Instructor:
             + self.opt.kd_contrastive_weight * kd_contrastive_loss
             + self.opt.kd_margin_weight * kd_margin_loss
             + self.opt.kd_rank_weight * kd_rank_loss
+            + kd_proto_loss
         )
 
         components = {
@@ -525,6 +559,9 @@ class Instructor:
             'kd_contrastive': kd_contrastive_loss,
             'kd_margin': kd_margin_loss,
             'kd_rank': kd_rank_loss,
+            'kd_proto': kd_proto_loss,
+            'kd_proto_align': kd_proto_align,
+            'kd_proto_relation': kd_proto_relation,
         }
         return total_loss, components, sample_weights
 
@@ -621,6 +658,11 @@ class Instructor:
                         log_message += ', kd_margin: {:.4f}'.format(kd_components['kd_margin'].item())
                     if self.opt.kd_rank_weight > 0:
                         log_message += ', kd_rank: {:.4f}'.format(kd_components['kd_rank'].item())
+                    if self.opt.kd_proto_weight > 0 or self.opt.kd_proto_relation_weight > 0:
+                        log_message += ', kd_proto: {:.4f}, kd_proto_rel: {:.4f}'.format(
+                            kd_components['kd_proto_align'].item(),
+                            kd_components['kd_proto_relation'].item(),
+                        )
                     if sample_weights is not None:
                         log_message += ', kd_w_mean: {:.4f}, kd_w_min: {:.4f}, kd_w_max: {:.4f}'.format(
                             sample_weights.mean().item(),
@@ -855,6 +897,8 @@ def main():
     parser.add_argument('--kd_margin_weight', default=0.0, type=float)
     parser.add_argument('--kd_rank_weight', default=0.0, type=float)
     parser.add_argument('--kd_rank_temperature', default=1.0, type=float)
+    parser.add_argument('--kd_proto_weight', default=0.0, type=float)
+    parser.add_argument('--kd_proto_relation_weight', default=0.0, type=float)
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
