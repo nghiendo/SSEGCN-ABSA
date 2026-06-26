@@ -14,6 +14,9 @@ class SSEGCNStudentClassifier(nn.Module):
     def encode(self, inputs):
         return self.encoder(inputs)
 
+    def encode_tokens(self, inputs):
+        return self.encoder.encode_tokens(inputs)
+
     def project_for_distill(self, features):
         return self.distill_proj(features)
 
@@ -50,7 +53,7 @@ class TinySSEGCNEncoder(nn.Module):
         self.aspect_score = nn.Linear(feature_dim, feature_dim, bias=False)
         self.output_dropout = nn.Dropout(opt.student_output_dropout)
 
-    def forward(self, inputs):
+    def encode_tokens(self, inputs):
         tok, asp, pos, head, deprel, post, mask, lengths, short_mask = inputs
         del asp, head, deprel
 
@@ -79,6 +82,10 @@ class TinySSEGCNEncoder(nn.Module):
         )
         encoded, _ = self.encoder(packed)
         encoded, _ = nn.utils.rnn.pad_packed_sequence(encoded, batch_first=True)
+        return encoded, tok, mask, short_mask, lengths
+
+    def forward(self, inputs):
+        encoded, tok, mask, short_mask, lengths = self.encode_tokens(inputs)
 
         aspect_denominator = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
         aspect_repr = (encoded * mask.unsqueeze(-1)).sum(dim=1) / aspect_denominator

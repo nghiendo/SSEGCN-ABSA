@@ -35,6 +35,9 @@ class SSEGCNBertClassifier(nn.Module):
     def encode(self, inputs):
         return self.gcn_model(inputs)
 
+    def encode_tokens(self, inputs):
+        return self.gcn_model.encode_tokens(inputs)
+
     def forward(self, inputs):
         outputs1 = self.encode(inputs)
         logits = self.classifier(outputs1)
@@ -49,12 +52,17 @@ class GCNAbsaModel(nn.Module):
         self.gcn = GCNBert(bert, opt, opt.num_layers)
 
     def forward(self, inputs):
+        h = self.encode_tokens(inputs)
+        _, _, _, _, _, _, aspect_mask, _ = inputs
+        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)
+        aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, 100)
+        outputs1 = (h * aspect_mask).sum(dim=1) / asp_wn
+        return outputs1
+
+    def encode_tokens(self, inputs):
         text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask= inputs
-        h = self.gcn(inputs)    
-        asp_wn = aspect_mask.sum(dim=1).unsqueeze(-1)  
-        aspect_mask = aspect_mask.unsqueeze(-1).repeat(1, 1, 100)  
-        outputs1 = (h*aspect_mask).sum(dim=1) / asp_wn
-        return outputs1   
+        del text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask
+        return self.gcn(inputs)
 
 
 class GCNBert(nn.Module):

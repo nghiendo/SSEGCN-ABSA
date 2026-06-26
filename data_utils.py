@@ -425,6 +425,10 @@ class ABSAGCNData(Dataset):
             context_asp_attention_mask = np.asarray(context_asp_attention_mask, dtype='int64')
             src_mask = np.asarray(src_mask, dtype='int64')
             aspect_mask = np.asarray(aspect_mask, dtype='int64')
+            tok2ori_map = np.asarray(
+                [-1] + tok2ori_map + [-1] * (opt.max_length - context_len - 1),
+                dtype='int64',
+            )
 
             row_short = obj['short']
             
@@ -483,6 +487,7 @@ class ABSAGCNData(Dataset):
                 'asp_end': asp_end,
                 'src_mask': src_mask,
                 'aspect_mask': aspect_mask,
+                'tok2ori_map': tok2ori_map,
                 'polarity': polarity,
                 'short_mask': short_mask,
             }

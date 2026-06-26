@@ -451,6 +451,41 @@ class Instructor:
         )
         return total, proto_align, proto_relation
 
+    def _aggregate_teacher_word_states(self, teacher_token_states, tok2ori_map, student_lengths):
+        batch_size, _, hidden_dim = teacher_token_states.size()
+        max_words = int(student_lengths.max().item())
+        word_states = teacher_token_states.new_zeros(batch_size, max_words, hidden_dim)
+        word_counts = teacher_token_states.new_zeros(batch_size, max_words, 1)
+
+        clamped_map = tok2ori_map.clamp(min=-1, max=max_words - 1)
+        valid_positions = clamped_map.ge(0)
+        if valid_positions.any():
+            gather_index = clamped_map.masked_fill(~valid_positions, 0).unsqueeze(-1).expand(-1, -1, hidden_dim)
+            word_states.scatter_add_(1, gather_index, teacher_token_states * valid_positions.unsqueeze(-1).float())
+            word_counts.scatter_add_(
+                1,
+                gather_index[:, :, :1],
+                valid_positions.unsqueeze(-1).float(),
+            )
+
+        word_states = word_states / word_counts.clamp_min(1.0)
+        word_mask = torch.arange(max_words, device=student_lengths.device).unsqueeze(0) < student_lengths.unsqueeze(1)
+        word_mask = word_mask & word_counts.squeeze(-1).gt(0)
+        return word_states, word_mask
+
+    def _token_relation_kd_loss(self, student_token_states, teacher_word_states, word_mask):
+        student_norm = F.normalize(student_token_states, p=2, dim=-1)
+        teacher_norm = F.normalize(teacher_word_states, p=2, dim=-1)
+
+        student_relation = torch.matmul(student_norm, student_norm.transpose(1, 2))
+        teacher_relation = torch.matmul(teacher_norm, teacher_norm.transpose(1, 2))
+
+        pair_mask = word_mask.unsqueeze(1) & word_mask.unsqueeze(2)
+        pair_mask = pair_mask.float()
+        diff = (student_relation - teacher_relation) ** 2
+        per_sample = (diff * pair_mask).sum(dim=(1, 2)) / pair_mask.sum(dim=(1, 2)).clamp_min(1.0)
+        return per_sample.mean()
+
     def _get_feature_target(self, teacher_logits, teacher_features):
         if self.opt.kd_feature_mode == 'teacher_hidden':
             return teacher_features
@@ -545,6 +580,14 @@ class Instructor:
                 teacher_logits=teacher_logits,
             )
 
+        kd_token_relation_loss = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_token_relation_weight > 0:
+            kd_token_relation_loss = self._token_relation_kd_loss(
+                self.current_student_token_states,
+                self.current_teacher_word_states,
+                self.current_word_mask,
+            )
+
         total_loss = (
             self.opt.kd_beta * kd_logits_loss
             + self.opt.kd_gamma * kd_feature_loss
@@ -555,6 +598,7 @@ class Instructor:
             + self.opt.kd_margin_weight * kd_margin_loss
             + self.opt.kd_rank_weight * kd_rank_loss
             + kd_proto_loss
+            + self.opt.kd_token_relation_weight * kd_token_relation_loss
         )
 
         components = {
@@ -572,6 +616,7 @@ class Instructor:
             'kd_proto': kd_proto_loss,
             'kd_proto_align': kd_proto_align,
             'kd_proto_relation': kd_proto_relation,
+            'kd_token_relation': kd_token_relation_loss,
         }
         return total_loss, components, sample_weights
 
@@ -633,14 +678,27 @@ class Instructor:
                 student_inputs = [sample_batched[col].to(self.opt.device) for col in self.student_input_cols]
                 teacher_inputs = [sample_batched[col].to(self.opt.device) for col in self.teacher_input_cols]
                 targets = sample_batched['polarity'].to(self.opt.device)
+                student_lengths = sample_batched['length'].to(self.opt.device).long()
+                teacher_tok2ori_map = sample_batched['tok2ori_map'].to(self.opt.device).long()
 
                 student_features = self.model.encode(student_inputs)
                 projected_features = self.model.project_for_distill(student_features)
                 student_logits = self.model.classifier(student_features)
+                student_token_states, _, _, _, _ = self.model.encode_tokens(student_inputs)
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
                     teacher_features = self.teacher_model.encode(teacher_inputs)
+                    teacher_token_states = self.teacher_model.encode_tokens(teacher_inputs)
+
+                teacher_word_states, word_mask = self._aggregate_teacher_word_states(
+                    teacher_token_states,
+                    teacher_tok2ori_map,
+                    student_lengths,
+                )
+                self.current_student_token_states = student_token_states
+                self.current_teacher_word_states = teacher_word_states
+                self.current_word_mask = word_mask
 
                 hard_loss = criterion(student_logits, targets)
                 kd_loss, kd_components, sample_weights = self._kd_loss(
@@ -717,6 +775,8 @@ class Instructor:
                             kd_components['kd_proto_align'].item(),
                             kd_components['kd_proto_relation'].item(),
                         )
+                    if self.opt.kd_token_relation_weight > 0:
+                        log_message += ', kd_tokrel: {:.4f}'.format(kd_components['kd_token_relation'].item())
                     if sample_weights is not None:
                         log_message += ', kd_w_mean: {:.4f}, kd_w_min: {:.4f}, kd_w_max: {:.4f}'.format(
                             sample_weights.mean().item(),
@@ -960,6 +1020,7 @@ def main():
     parser.add_argument('--kd_rank_temperature', default=1.0, type=float)
     parser.add_argument('--kd_proto_weight', default=0.0, type=float)
     parser.add_argument('--kd_proto_relation_weight', default=0.0, type=float)
+    parser.add_argument('--kd_token_relation_weight', default=0.0, type=float)
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
