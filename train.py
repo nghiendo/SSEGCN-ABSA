@@ -269,26 +269,181 @@ class Instructor:
     def _weighted_mean(self, values, weights):
         return (values * weights).sum() / weights.sum().clamp_min(1e-12)
 
-    def _kd_loss(self, student_logits, student_features, teacher_logits, temperature):
-        soft_targets = F.softmax(teacher_logits / temperature, dim=-1)
-        student_log_probs = F.log_softmax(student_logits / temperature, dim=-1)
+    def _standardize_logits(self, logits):
+        mean = logits.mean(dim=-1, keepdim=True)
+        std = logits.std(dim=-1, keepdim=True, unbiased=False).clamp_min(1e-6)
+        return (logits - mean) / std
+
+    def _prepare_kd_logits(self, logits):
+        if self.opt.kd_logit_standardize:
+            return self._standardize_logits(logits)
+        return logits
+
+    def _cat_target_other(self, probs, target_mask, other_mask):
+        target_prob = (probs * target_mask).sum(dim=1, keepdim=True)
+        other_prob = (probs * other_mask).sum(dim=1, keepdim=True)
+        return torch.cat([target_prob, other_prob], dim=1)
+
+    def _dkd_loss(self, student_logits, teacher_logits, targets, temperature, sample_weights):
+        target_mask = torch.zeros_like(student_logits).scatter_(1, targets.unsqueeze(1), 1).bool()
+        other_mask = ~target_mask
+
+        student_probs = F.softmax(student_logits / temperature, dim=-1)
+        teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)
+
+        student_two_way = self._cat_target_other(student_probs, target_mask, other_mask)
+        teacher_two_way = self._cat_target_other(teacher_probs, target_mask, other_mask)
+        tckd_per_sample = F.kl_div(
+            torch.log(student_two_way.clamp_min(1e-12)),
+            teacher_two_way,
+            reduction='none',
+        ).sum(dim=-1) * (temperature ** 2)
+
+        large_negative = 1e9
+        teacher_non_target = teacher_logits / temperature - target_mask.float() * large_negative
+        student_non_target = student_logits / temperature - target_mask.float() * large_negative
+        nckd_per_sample = F.kl_div(
+            F.log_softmax(student_non_target, dim=-1),
+            F.softmax(teacher_non_target, dim=-1),
+            reduction='none',
+        ).sum(dim=-1) * (temperature ** 2)
+
+        if sample_weights is not None:
+            tckd_loss = self._weighted_mean(tckd_per_sample, sample_weights)
+            nckd_loss = self._weighted_mean(nckd_per_sample, sample_weights)
+        else:
+            tckd_loss = tckd_per_sample.mean()
+            nckd_loss = nckd_per_sample.mean()
+
+        total = self.opt.kd_dkd_target_weight * tckd_loss + self.opt.kd_dkd_non_target_weight * nckd_loss
+        return total, tckd_loss, nckd_loss
+
+    def _pairwise_distance(self, features):
+        distances = torch.cdist(features, features, p=2)
+        valid = distances > 0
+        mean_distance = distances[valid].mean() if valid.any() else distances.new_tensor(1.0)
+        return distances / mean_distance.clamp_min(1e-6)
+
+    def _rkd_distance_loss(self, student_features, teacher_features):
+        student_distance = self._pairwise_distance(student_features)
+        teacher_distance = self._pairwise_distance(teacher_features)
+        return F.smooth_l1_loss(student_distance, teacher_distance)
+
+    def _rkd_angle_loss(self, student_features, teacher_features):
+        student_diff = F.normalize(student_features.unsqueeze(0) - student_features.unsqueeze(1), p=2, dim=-1)
+        teacher_diff = F.normalize(teacher_features.unsqueeze(0) - teacher_features.unsqueeze(1), p=2, dim=-1)
+        student_angle = torch.bmm(student_diff, student_diff.transpose(1, 2))
+        teacher_angle = torch.bmm(teacher_diff, teacher_diff.transpose(1, 2))
+        return F.smooth_l1_loss(student_angle, teacher_angle)
+
+    def _contrastive_kd_loss(self, student_features, teacher_features):
+        student_norm = F.normalize(student_features, p=2, dim=-1)
+        teacher_norm = F.normalize(teacher_features, p=2, dim=-1)
+        logits = torch.matmul(student_norm, teacher_norm.transpose(0, 1)) / self.opt.kd_contrastive_temperature
+        targets = torch.arange(student_features.size(0), device=student_features.device)
+        loss_st = F.cross_entropy(logits, targets)
+        loss_ts = F.cross_entropy(logits.transpose(0, 1), targets)
+        return 0.5 * (loss_st + loss_ts)
+
+    def _margin_kd_loss(self, student_logits, teacher_logits, targets, sample_weights):
+        target_idx = targets.unsqueeze(1)
+        student_target = student_logits.gather(1, target_idx).squeeze(1)
+        teacher_target = teacher_logits.gather(1, target_idx).squeeze(1)
+
+        mask = torch.zeros_like(student_logits).scatter_(1, target_idx, 1).bool()
+        student_rival = student_logits.masked_fill(mask, -1e9).max(dim=1).values
+        teacher_rival = teacher_logits.masked_fill(mask, -1e9).max(dim=1).values
+
+        student_margin = student_target - student_rival
+        teacher_margin = teacher_target - teacher_rival
+        per_sample = F.smooth_l1_loss(student_margin, teacher_margin, reduction='none')
+        if sample_weights is not None:
+            return self._weighted_mean(per_sample, sample_weights)
+        return per_sample.mean()
+
+    def _get_feature_target(self, teacher_logits, teacher_features):
+        if self.opt.kd_feature_mode == 'teacher_hidden':
+            return teacher_features
+        teacher_probs = F.softmax(teacher_logits, dim=-1)
+        return teacher_probs @ self.teacher_model.classifier.weight
+
+    def _feature_kd_loss(self, student_features, feature_target, sample_weights):
+        if self.opt.kd_feature_loss == 'cosine':
+            per_sample = 1.0 - F.cosine_similarity(student_features, feature_target, dim=-1)
+        else:
+            per_sample = F.mse_loss(student_features, feature_target, reduction='none').mean(dim=-1)
+
+        if sample_weights is not None:
+            return self._weighted_mean(per_sample, sample_weights)
+        return per_sample.mean()
+
+    def _kd_loss(self, student_logits, student_features, teacher_logits, teacher_features, targets, temperature):
         if self.opt.kd_use_instance_weighting:
             sample_weights = self._kd_instance_weights(teacher_logits, student_logits)
-            kd_logits_per_sample = F.kl_div(student_log_probs, soft_targets, reduction='none').sum(dim=-1)
-            kd_logits_loss = self._weighted_mean(kd_logits_per_sample, sample_weights) * (temperature ** 2)
         else:
             sample_weights = None
-            kd_logits_loss = F.kl_div(student_log_probs, soft_targets, reduction='batchmean') * (temperature ** 2)
 
-        with torch.no_grad():
-            teacher_probs = F.softmax(teacher_logits, dim=-1)
-        feature_target = teacher_probs @ self.teacher_model.classifier.weight
-        if sample_weights is not None:
-            kd_feature_per_sample = F.mse_loss(student_features, feature_target, reduction='none').mean(dim=-1)
-            kd_feature_loss = self._weighted_mean(kd_feature_per_sample, sample_weights)
+        prepared_student_logits = self._prepare_kd_logits(student_logits)
+        prepared_teacher_logits = self._prepare_kd_logits(teacher_logits)
+
+        if self.opt.kd_logit_mode == 'dkd':
+            kd_logits_loss, tckd_loss, nckd_loss = self._dkd_loss(
+                prepared_student_logits,
+                prepared_teacher_logits,
+                targets,
+                temperature,
+                sample_weights,
+            )
         else:
-            kd_feature_loss = F.mse_loss(student_features, feature_target)
-        return kd_logits_loss, kd_feature_loss, sample_weights
+            soft_targets = F.softmax(prepared_teacher_logits / temperature, dim=-1)
+            student_log_probs = F.log_softmax(prepared_student_logits / temperature, dim=-1)
+            kd_logits_per_sample = F.kl_div(student_log_probs, soft_targets, reduction='none').sum(dim=-1)
+            kd_logits_per_sample = kd_logits_per_sample * (temperature ** 2)
+            if sample_weights is not None:
+                kd_logits_loss = self._weighted_mean(kd_logits_per_sample, sample_weights)
+            else:
+                kd_logits_loss = kd_logits_per_sample.mean()
+            tckd_loss = kd_logits_loss.new_tensor(0.0)
+            nckd_loss = kd_logits_loss.new_tensor(0.0)
+
+        feature_target = self._get_feature_target(teacher_logits, teacher_features)
+        kd_feature_loss = self._feature_kd_loss(student_features, feature_target, sample_weights)
+
+        kd_relation_distance = kd_feature_loss.new_tensor(0.0)
+        kd_relation_angle = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_relation_weight > 0:
+            kd_relation_distance = self._rkd_distance_loss(student_features, feature_target)
+            kd_relation_angle = self._rkd_angle_loss(student_features, feature_target)
+
+        kd_contrastive_loss = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_contrastive_weight > 0:
+            kd_contrastive_loss = self._contrastive_kd_loss(student_features, feature_target)
+
+        kd_margin_loss = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_margin_weight > 0:
+            kd_margin_loss = self._margin_kd_loss(student_logits, teacher_logits, targets, sample_weights)
+
+        total_loss = (
+            self.opt.kd_beta * kd_logits_loss
+            + self.opt.kd_gamma * kd_feature_loss
+            + self.opt.kd_relation_weight * (
+                kd_relation_distance + self.opt.kd_relation_angle_weight * kd_relation_angle
+            )
+            + self.opt.kd_contrastive_weight * kd_contrastive_loss
+            + self.opt.kd_margin_weight * kd_margin_loss
+        )
+
+        components = {
+            'kd_logit': kd_logits_loss,
+            'kd_feature': kd_feature_loss,
+            'kd_tckd': tckd_loss,
+            'kd_nckd': nckd_loss,
+            'kd_relation_distance': kd_relation_distance,
+            'kd_relation_angle': kd_relation_angle,
+            'kd_contrastive': kd_contrastive_loss,
+            'kd_margin': kd_margin_loss,
+        }
+        return total_loss, components, sample_weights
 
     def _train_kd(self, criterion, optimizer, max_test_acc_overall=0):
         max_test_acc = 0
@@ -316,19 +471,18 @@ class Instructor:
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
+                    teacher_features = self.teacher_model.encode(teacher_inputs)
 
                 hard_loss = criterion(student_logits, targets)
-                kd_logits_loss, kd_feature_loss, sample_weights = self._kd_loss(
+                kd_loss, kd_components, sample_weights = self._kd_loss(
                     student_logits,
                     projected_features,
                     teacher_logits,
+                    teacher_features,
+                    targets,
                     self.opt.kd_temperature,
                 )
-                loss = (
-                    self.opt.kd_alpha * hard_loss
-                    + self.opt.kd_beta * kd_logits_loss
-                    + self.opt.kd_gamma * kd_feature_loss
-                )
+                loss = self.opt.kd_alpha * hard_loss + kd_loss
 
                 loss.backward()
                 optimizer.step()
@@ -352,16 +506,31 @@ class Instructor:
                             self.best_model = copy.deepcopy(self.model)
                             logger.info('>> saved: {}'.format(model_path))
                     log_message = (
-                        'loss: {:.4f}, hard: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
+                        'loss: {:.4f}, hard: {:.4f}, kd_total: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
                             loss.item(),
                             hard_loss.item(),
-                            kd_logits_loss.item(),
-                            kd_feature_loss.item(),
+                            kd_loss.item(),
+                            kd_components['kd_logit'].item(),
+                            kd_components['kd_feature'].item(),
                             train_acc,
                             test_acc,
                             f1,
                         )
                     )
+                    if self.opt.kd_logit_mode == 'dkd':
+                        log_message += ', tckd: {:.4f}, nckd: {:.4f}'.format(
+                            kd_components['kd_tckd'].item(),
+                            kd_components['kd_nckd'].item(),
+                        )
+                    if self.opt.kd_relation_weight > 0:
+                        log_message += ', rkd_d: {:.4f}, rkd_a: {:.4f}'.format(
+                            kd_components['kd_relation_distance'].item(),
+                            kd_components['kd_relation_angle'].item(),
+                        )
+                    if self.opt.kd_contrastive_weight > 0:
+                        log_message += ', kd_ctr: {:.4f}'.format(kd_components['kd_contrastive'].item())
+                    if self.opt.kd_margin_weight > 0:
+                        log_message += ', kd_margin: {:.4f}'.format(kd_components['kd_margin'].item())
                     if sample_weights is not None:
                         log_message += ', kd_w_mean: {:.4f}, kd_w_min: {:.4f}, kd_w_max: {:.4f}'.format(
                             sample_weights.mean().item(),
@@ -581,6 +750,17 @@ def main():
     parser.add_argument('--kd_alpha', default=0.4, type=float)
     parser.add_argument('--kd_beta', default=0.4, type=float)
     parser.add_argument('--kd_gamma', default=0.2, type=float)
+    parser.add_argument('--kd_logit_mode', default='kl', type=str, choices=['kl', 'dkd'])
+    parser.add_argument('--kd_logit_standardize', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--kd_dkd_target_weight', default=1.0, type=float)
+    parser.add_argument('--kd_dkd_non_target_weight', default=4.0, type=float)
+    parser.add_argument('--kd_feature_mode', default='classifier_projection', type=str, choices=['classifier_projection', 'teacher_hidden'])
+    parser.add_argument('--kd_feature_loss', default='mse', type=str, choices=['mse', 'cosine'])
+    parser.add_argument('--kd_relation_weight', default=0.0, type=float)
+    parser.add_argument('--kd_relation_angle_weight', default=2.0, type=float)
+    parser.add_argument('--kd_contrastive_weight', default=0.0, type=float)
+    parser.add_argument('--kd_contrastive_temperature', default=0.2, type=float)
+    parser.add_argument('--kd_margin_weight', default=0.0, type=float)
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))

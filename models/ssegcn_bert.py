@@ -32,8 +32,11 @@ class SSEGCNBertClassifier(nn.Module):
         self.gcn_model = GCNAbsaModel(bert, opt=opt)
         self.classifier = nn.Linear(100, opt.polarities_dim)
 
+    def encode(self, inputs):
+        return self.gcn_model(inputs)
+
     def forward(self, inputs):
-        outputs1 = self.gcn_model(inputs)
+        outputs1 = self.encode(inputs)
         logits = self.classifier(outputs1)
 
         return logits, None
