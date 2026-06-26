@@ -38,6 +38,9 @@ class SSEGCNBertClassifier(nn.Module):
     def encode_tokens(self, inputs):
         return self.gcn_model.encode_tokens(inputs)
 
+    def encode_bert_hidden_states(self, inputs):
+        return self.gcn_model.encode_bert_hidden_states(inputs)
+
     def forward(self, inputs):
         outputs1 = self.encode(inputs)
         logits = self.classifier(outputs1)
@@ -59,6 +62,9 @@ class SSEGCNBertStudentClassifier(nn.Module):
 
     def encode_tokens(self, inputs):
         return self.gcn_model.encode_tokens(inputs)
+
+    def encode_bert_hidden_states(self, inputs):
+        return self.gcn_model.encode_bert_hidden_states(inputs)
 
     def project_for_distill(self, features):
         return self.distill_proj(features)
@@ -91,6 +97,9 @@ class GCNAbsaModel(nn.Module):
         del text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask
         return self.gcn(inputs)
 
+    def encode_bert_hidden_states(self, inputs):
+        return self.gcn.encode_bert_hidden_states(inputs)
+
 
 class GCNBert(nn.Module):
     def __init__(self, bert, opt, num_layers):
@@ -122,6 +131,18 @@ class GCNBert(nn.Module):
         self.affine1 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
         self.affine2 = nn.Parameter(torch.Tensor(self.mem_dim, self.mem_dim))
 
+    def encode_bert_hidden_states(self, inputs):
+        text_bert_indices, bert_segments_ids, attention_mask, asp_start, asp_end, src_mask, aspect_mask, short_mask = inputs
+        del asp_start, asp_end, src_mask, aspect_mask, short_mask
+        outputs = self.bert(
+            text_bert_indices,
+            attention_mask=attention_mask,
+            token_type_ids=bert_segments_ids,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        return outputs.hidden_states
+
     def forward(self, inputs): 
 
 
@@ -130,9 +151,14 @@ class GCNBert(nn.Module):
         batch = src_mask.size(0)
         seq_len = src_mask.size()[2]
 
-        outputs = self.bert(text_bert_indices, attention_mask=attention_mask, token_type_ids=bert_segments_ids)
-        sequence_output = outputs[0]
-        pooled_output = outputs[1]
+        outputs = self.bert(
+            text_bert_indices,
+            attention_mask=attention_mask,
+            token_type_ids=bert_segments_ids,
+            return_dict=True,
+        )
+        sequence_output = outputs.last_hidden_state
+        pooled_output = outputs.pooler_output
         sequence_output = self.layernorm(sequence_output)
         gcn_inputs = self.bert_drop(sequence_output)  
         pooled_output = self.pooled_drop(pooled_output)

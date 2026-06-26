@@ -809,6 +809,68 @@ class Instructor:
         token_mask = sample_batched['src_mask'].to(self.opt.device).bool()
         return projected_student_token_states, teacher_token_states, token_mask
 
+    def _prepare_hidden_layer_kd_states(self, sample_batched, student_inputs, teacher_inputs):
+        if 'bert' not in self.opt.model_name:
+            return None, None, None
+
+        student_hidden_states = self.model.encode_bert_hidden_states(student_inputs)
+        with torch.no_grad():
+            teacher_hidden_states = self.teacher_model.encode_bert_hidden_states(teacher_inputs)
+
+        token_mask = sample_batched['attention_mask'].to(self.opt.device).bool()
+        return student_hidden_states, teacher_hidden_states, token_mask
+
+    def _select_hidden_layer_indices(self, hidden_states, target_layers):
+        source_layers = len(hidden_states) - 1
+        if source_layers <= 0 or target_layers <= 0:
+            return []
+
+        source_count = min(source_layers, len(hidden_states) - 1)
+        if target_layers >= source_count:
+            return list(range(1, source_count + 1))
+
+        if self.opt.kd_hidden_layer_map == 'first':
+            return list(range(1, target_layers + 1))
+        if self.opt.kd_hidden_layer_map == 'last':
+            start = source_count - target_layers + 1
+            return list(range(start, source_count + 1))
+
+        if target_layers == 1:
+            return [source_count]
+
+        return [
+            1 + int(round(idx * (source_count - 1) / float(target_layers - 1)))
+            for idx in range(target_layers)
+        ]
+
+    def _hidden_layer_kd_loss(self, student_hidden_states, teacher_hidden_states, token_mask, sample_weights):
+        student_indices = self._select_hidden_layer_indices(
+            student_hidden_states,
+            min(self.opt.kd_hidden_layer_count, len(student_hidden_states) - 1),
+        )
+        teacher_indices = self._select_hidden_layer_indices(
+            teacher_hidden_states,
+            len(student_indices),
+        )
+        if not student_indices or not teacher_indices:
+            return token_mask.float().new_tensor(0.0)
+
+        per_layer_losses = []
+        mask = token_mask.float()
+        for student_idx, teacher_idx in zip(student_indices, teacher_indices):
+            student_layer = student_hidden_states[student_idx]
+            teacher_layer = teacher_hidden_states[teacher_idx]
+            if self.opt.kd_hidden_layer_loss == 'cosine':
+                per_token = 1.0 - F.cosine_similarity(student_layer, teacher_layer, dim=-1)
+            else:
+                per_token = F.mse_loss(student_layer, teacher_layer, reduction='none').mean(dim=-1)
+            per_sample = (per_token * mask).sum(dim=-1) / mask.sum(dim=-1).clamp_min(1.0)
+            if sample_weights is not None:
+                per_layer_losses.append(self._weighted_mean(per_sample, sample_weights))
+            else:
+                per_layer_losses.append(per_sample.mean())
+        return torch.stack(per_layer_losses).mean()
+
     def _token_relation_kd_loss(self, student_token_states, teacher_word_states, word_mask):
         student_norm = F.normalize(student_token_states, p=2, dim=-1)
         teacher_norm = F.normalize(teacher_word_states, p=2, dim=-1)
@@ -976,6 +1038,15 @@ class Instructor:
                 sample_weights,
             )
 
+        kd_hidden_layer_loss = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_hidden_layer_weight > 0:
+            kd_hidden_layer_loss = self._hidden_layer_kd_loss(
+                self.current_student_hidden_states,
+                self.current_teacher_hidden_states,
+                self.current_hidden_mask,
+                sample_weights,
+            )
+
         total_loss = (
             self.opt.kd_beta * kd_logits_loss
             + self.opt.kd_gamma * kd_feature_loss
@@ -988,6 +1059,7 @@ class Instructor:
             + kd_proto_loss
             + self.opt.kd_token_relation_weight * kd_token_relation_loss
             + self.opt.kd_token_hidden_weight * kd_token_hidden_loss
+            + self.opt.kd_hidden_layer_weight * kd_hidden_layer_loss
         )
 
         components = {
@@ -1007,6 +1079,7 @@ class Instructor:
             'kd_proto_relation': kd_proto_relation,
             'kd_token_relation': kd_token_relation_loss,
             'kd_token_hidden': kd_token_hidden_loss,
+            'kd_hidden_layer': kd_hidden_layer_loss,
         }
         return total_loss, components, sample_weights
 
@@ -1079,6 +1152,9 @@ class Instructor:
                 self.current_projected_student_token_states = None
                 self.current_teacher_word_states = None
                 self.current_word_mask = None
+                self.current_student_hidden_states = None
+                self.current_teacher_hidden_states = None
+                self.current_hidden_mask = None
                 self.current_weight_teacher_logits = None
                 self.current_primary_teacher_logits = None
                 self.current_aux_teacher_logits = None
@@ -1105,6 +1181,16 @@ class Instructor:
                     self.current_projected_student_token_states = projected_student_token_states
                     self.current_teacher_word_states = teacher_token_states
                     self.current_word_mask = token_mask
+
+                if self.opt.kd_hidden_layer_weight > 0:
+                    student_hidden_states, teacher_hidden_states, hidden_mask = self._prepare_hidden_layer_kd_states(
+                        sample_batched,
+                        student_inputs,
+                        teacher_inputs,
+                    )
+                    self.current_student_hidden_states = student_hidden_states
+                    self.current_teacher_hidden_states = teacher_hidden_states
+                    self.current_hidden_mask = hidden_mask
 
                 hard_loss = criterion(student_logits, targets)
                 kd_loss, kd_components, sample_weights = self._kd_loss(
@@ -1183,6 +1269,8 @@ class Instructor:
                         )
                     if self.opt.kd_token_relation_weight > 0:
                         log_message += ', kd_tokrel: {:.4f}'.format(kd_components['kd_token_relation'].item())
+                    if self.opt.kd_hidden_layer_weight > 0:
+                        log_message += ', kd_hid: {:.4f}'.format(kd_components['kd_hidden_layer'].item())
                     if sample_weights is not None:
                         log_message += ', kd_w_mean: {:.4f}, kd_w_min: {:.4f}, kd_w_max: {:.4f}'.format(
                             sample_weights.mean().item(),
@@ -1439,6 +1527,10 @@ def main():
     parser.add_argument('--kd_token_relation_weight', default=0.0, type=float)
     parser.add_argument('--kd_token_hidden_weight', default=0.0, type=float)
     parser.add_argument('--kd_token_hidden_loss', default='cosine', type=str, choices=['mse', 'cosine'])
+    parser.add_argument('--kd_hidden_layer_weight', default=0.0, type=float)
+    parser.add_argument('--kd_hidden_layer_count', default=6, type=int)
+    parser.add_argument('--kd_hidden_layer_loss', default='cosine', type=str, choices=['mse', 'cosine'])
+    parser.add_argument('--kd_hidden_layer_map', default='uniform', type=str, choices=['uniform', 'first', 'last'])
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_weight_use_primary_teacher', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_teacher_agreement_scale', default=0.0, type=float)
