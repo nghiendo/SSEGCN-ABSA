@@ -130,3 +130,12 @@ dmypy.json
 
 .agents/
 agents.md
+
+# Experiment artifacts
+log/
+state_dict/
+
+# Locally generated dataset/build artifacts
+dataset/Laptops_corenlp/*embedding_matrix.dat
+dataset/Laptops_corenlp/*tokenizer.dat
+dataset/Laptops_corenlp/vocab_*.vocab

@@ -31,7 +31,21 @@ To train the SSEGCN model, run:
 
 `sh run.sh`
 
+## Distillation
+
+The repository also contains a validated shallow-BERT distillation path that compresses the original BERT teacher into a 6-layer BERT student while keeping the SSEGCN ABSA head.
+
+Main references:
+
+- [docs/SHALLOWBERT_DISTILLATION_ARCHITECTURE.md](/SSEGCN-ABSA/docs/SHALLOWBERT_DISTILLATION_ARCHITECTURE.md)
+- [KD_EXPERIMENT_LOG.md](/SSEGCN-ABSA/KD_EXPERIMENT_LOG.md)
+
+Cross-dataset reproduction scripts:
+
+- `bash experiments/run_kd_shallowbert6_exp64_chain_short.sh laptop`
+- `bash experiments/run_kd_shallowbert6_exp64_chain_short.sh restaurant`
+- `bash experiments/run_kd_shallowbert6_exp64_chain_short.sh twitter`
+
 ## Credits
 
 The code and datasets in this repository are based on [DualGCN_ABSA](https://github.com/CCChenhao997/DualGCN-ABSA) .
-
