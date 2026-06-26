@@ -220,6 +220,14 @@ Experiments:
      - Best observed checkpoint: `acc=0.6772`, `macro_f1=0.6254`
      - Conclusion: stage-4 self-distillation underperforms here, largely because the student-teacher feature projection path is too disruptive even with light weighting.
 
+27. `ab08e7d` `exp27: add short dkd stage2 distillation`
+   - Script: `experiments/run_kd_laptop_dkd_stage2_short.sh`
+   - Config delta: keep the current best checkpoint as initialization, switch logit KD to DKD, and reduce non-logit feature pressure for a one-epoch warm-started stage-2 pass
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6317`
+     - Conclusion: warm-started DKD is much more stable than the earlier from-scratch DKD run, but still does not beat the confidence-gated dual-teacher checkpoint on macro F1.
+
 Current best experiment:
 - Commit: `d50d299`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
