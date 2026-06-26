@@ -60,6 +60,8 @@ class Instructor:
         self.teacher_input_cols = None
         self.aux_teacher_input_cols = None
         self.current_weight_teacher_logits = None
+        self.current_primary_teacher_logits = None
+        self.current_aux_teacher_logits = None
 
         if opt.model_name == 'ssegcnbertstudent':
             self._build_student_kd_pipeline()
@@ -342,6 +344,22 @@ class Instructor:
 
     def _weighted_mean(self, values, weights):
         return (values * weights).sum() / weights.sum().clamp_min(1e-12)
+
+    def _teacher_agreement_weights(self):
+        if (
+            self.opt.kd_teacher_agreement_scale <= 0
+            or self.current_primary_teacher_logits is None
+            or self.current_aux_teacher_logits is None
+        ):
+            return None
+
+        with torch.no_grad():
+            primary_probs = F.softmax(self.current_primary_teacher_logits / self.opt.kd_temperature, dim=-1)
+            aux_probs = F.softmax(self.current_aux_teacher_logits / self.opt.kd_temperature, dim=-1)
+            disagreement = (primary_probs - aux_probs).abs().sum(dim=-1) / 2.0
+            agreement = 1.0 - disagreement
+            scale = float(self.opt.kd_teacher_agreement_scale)
+            return (1.0 - scale) + scale * agreement
 
     def _persist_best_model(self, model_path):
         if not model_path or self.best_model is None:
@@ -630,6 +648,16 @@ class Instructor:
         else:
             sample_weights = None
 
+        agreement_weights = self._teacher_agreement_weights()
+        if agreement_weights is not None:
+            if sample_weights is None:
+                sample_weights = agreement_weights
+            else:
+                sample_weights = sample_weights * agreement_weights
+            sample_weights = sample_weights.clamp_min(self.opt.kd_min_weight)
+            if self.opt.kd_normalize_weights:
+                sample_weights = sample_weights / sample_weights.mean().clamp_min(1e-12)
+
         prepared_student_logits = self._prepare_kd_logits(student_logits)
         prepared_teacher_logits = self._prepare_kd_logits(teacher_logits)
 
@@ -823,13 +851,17 @@ class Instructor:
                 self.current_teacher_word_states = None
                 self.current_word_mask = None
                 self.current_weight_teacher_logits = None
+                self.current_primary_teacher_logits = None
+                self.current_aux_teacher_logits = None
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
                     primary_teacher_logits = teacher_logits
                     teacher_features = self.teacher_model.encode(teacher_inputs)
+                    self.current_primary_teacher_logits = primary_teacher_logits
                     if self.aux_teacher_model is not None:
                         aux_teacher_logits, _ = self.aux_teacher_model(aux_teacher_inputs)
+                        self.current_aux_teacher_logits = aux_teacher_logits
                         teacher_logits = self._blend_teacher_logits(teacher_logits, aux_teacher_logits)
                     if self.opt.kd_weight_use_primary_teacher:
                         self.current_weight_teacher_logits = primary_teacher_logits
@@ -1183,6 +1215,7 @@ def main():
     parser.add_argument('--kd_token_hidden_loss', default='cosine', type=str, choices=['mse', 'cosine'])
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_weight_use_primary_teacher', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--kd_teacher_agreement_scale', default=0.0, type=float)
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_hidden_dim', default=32, type=int)
