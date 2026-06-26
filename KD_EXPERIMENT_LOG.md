@@ -129,6 +129,46 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.3861`, `macro_f1=0.2333`
      - Conclusion: the architecture change alone does not offset the optimization difficulty of a deeper student in this setup.
 
+16. `1ddc04f` `exp16: add student teacher and assistant kd scripts`
+   - Script: `experiments/run_kd_laptop_ban_stage3.sh`
+   - Config delta: born-again/self-distillation stage using the best student as teacher and warm-starting from the strongest pre-stage-2 checkpoint
+   - Result:
+     - Early-stopped after plateauing below the current best
+     - Best observed checkpoint before stop: `acc=0.6899`, `macro_f1=0.6314`
+     - Conclusion: self-distillation was stable and slightly improved accuracy, but still missed the best F1 by a small margin.
+
+17. `1ddc04f` `exp17: run assistant-wide student`
+   - Script: `experiments/run_kd_laptop_assistant_wide.sh`
+   - Config delta: train a wider intermediate student (`hidden_dim=48`, `pos/post_dim=12`) directly from the BERT teacher
+   - Result:
+     - Early-stopped after the wider student converged clearly below the current best
+     - Best observed checkpoint before stop: `acc=0.6772`, `macro_f1=0.6122`
+     - Conclusion: widening the student from random initialization improved over weak KD baselines, but not enough to justify a teacher-assistant chain from this checkpoint.
+
+18. `7328761` `exp18: add patient stage2 token hidden distillation`
+   - Script: `experiments/run_kd_laptop_patient_stage2.sh`
+   - Config delta: warm-start from the best checkpoint and add a token-level hidden-state alignment loss against teacher word states, analogous to a Patient KD / TinyBERT hidden-state stage
+   - Result:
+     - Early-stopped after the new token projection destabilized the already-strong checkpoint
+     - Best observed checkpoint before stop: `acc=0.6804`, `macro_f1=0.6218`
+     - Conclusion: direct token hidden matching with a freshly initialized projection was too aggressive for late-stage fine-tuning.
+
+19. `3b5b711` `exp19: add lite patient stage2 schedule`
+   - Script: `experiments/run_kd_laptop_patient_stage2_lite.sh`
+   - Config delta: keep the same token hidden loss but add a CE warmup, cosine KD ramp, lower LR, and much lighter token-hidden weight
+   - Result:
+     - Early-stopped after the best metric still came from the warmup phase
+     - Best observed checkpoint before stop: `acc=0.6867`, `macro_f1=0.6303`
+     - Conclusion: the gentler schedule preserved the checkpoint better, but token hidden KD still failed to beat the existing stage-2 baseline.
+
+20. `2315da7` `exp20: add dual teacher stage2 distillation`
+   - Script: `experiments/run_kd_laptop_dual_teacher_stage2.sh`
+   - Config delta: warm-start from the best student, keep feature supervision from the BERT teacher, and blend logits from BERT plus the best student teacher
+   - Result:
+     - Early-stopped after the dual-teacher blend plateaued below the current best
+     - Best observed checkpoint before stop: `acc=0.6835`, `macro_f1=0.6280`
+     - Conclusion: a fixed logits blend was stable but did not create extra headroom beyond the strongest single-teacher stage-2 recipe.
+
 Current best experiment:
 - Commit: `3d78ed2`
 - Script: `experiments/run_kd_laptop_tinybert_stage2.sh`
