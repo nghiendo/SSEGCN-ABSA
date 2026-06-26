@@ -196,6 +196,14 @@ Experiments:
      - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6293`
      - Conclusion: disagreement gating is weaker than confidence gating on top of the current best student.
 
+24. `e367610` `exp24: add confidence-gated stage3 dual teacher rerun`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage3_short.sh`
+   - Config delta: continue directly from the new best checkpoint with a smaller LR and slightly more KD-heavy weighting, while keeping the confidence-gated dual-teacher recipe
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6306`
+     - Conclusion: a conservative stage-3 polish pass did not improve on the confidence-gated stage-2 checkpoint.
+
 Current best experiment:
 - Commit: `d50d299`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
