@@ -613,6 +613,16 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7317`
    - Conclusion: the local twitter teacher is now reproducible and substantially stronger than the earlier short-run intermediates, giving the `exp64` student chain a realistic cross-dataset validation target on twitter.
 
+72. `9d36844` `exp72: validate exp64 chain on twitter`
+   - Script: `experiments/run_kd_twitter_shallowbert6_dist_short.sh`
+   - Config delta: run the full shallow-BERT continuation chain behind `exp54 -> exp61 -> exp64` on `twitter`, using the local twitter teacher and preserving the winning protocol rather than treating DIST-from-scratch as equivalent to the laptop result
+   - Result:
+     - Best selected checkpoint across the twitter chain: `state_dict/ssegcnbertshallow_twitter_acc_0.7710_f1_0.7589`
+     - Best observed accuracy during training/final selection: `acc=0.7710`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7589`
+     - Teacher reference: `state_dict/ssegcnbert_twitter_acc_0.7386_f1_0.7317`
+   - Conclusion: the same shallow-BERT continuation family that won on laptop transfers successfully to twitter as well, beating the local teacher by `0.0324` accuracy and `0.0272` macro F1.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
