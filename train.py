@@ -327,6 +327,11 @@ class Instructor:
             return probs_override
         return F.softmax(teacher_logits / max(temperature, 1e-6), dim=-1)
 
+    def _soften_probs(self, probs, temperature):
+        if abs(float(temperature) - 1.0) < 1e-6:
+            return probs
+        return F.softmax(torch.log(probs.clamp_min(1e-12)) / max(temperature, 1e-6), dim=-1)
+
     def _kd_instance_weights(self, teacher_logits, student_logits, teacher_probs_override=None):
         num_classes = teacher_logits.size(-1)
         normalizer = float(np.log(num_classes)) if num_classes > 1 else 1.0
@@ -698,11 +703,16 @@ class Instructor:
             tckd_loss = kd_logits_loss.new_tensor(0.0)
             nckd_loss = kd_logits_loss.new_tensor(0.0)
         else:
-            soft_targets = self._teacher_probs(
-                prepared_teacher_logits,
-                temperature=temperature,
-                probs_override=self.current_blended_teacher_probs,
-            )
+            if self.current_blended_teacher_probs is not None:
+                soft_targets = self._soften_probs(
+                    self.current_blended_teacher_probs,
+                    self.opt.kd_blended_target_temperature,
+                )
+            else:
+                soft_targets = self._teacher_probs(
+                    prepared_teacher_logits,
+                    temperature=temperature,
+                )
             student_log_probs = F.log_softmax(prepared_student_logits / temperature, dim=-1)
             kd_logits_per_sample = F.kl_div(student_log_probs, soft_targets, reduction='none').sum(dim=-1)
             kd_logits_per_sample = kd_logits_per_sample * (temperature ** 2)
@@ -1238,6 +1248,7 @@ def main():
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_weight_use_primary_teacher', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_teacher_agreement_scale', default=0.0, type=float)
+    parser.add_argument('--kd_blended_target_temperature', default=1.0, type=float)
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_hidden_dim', default=32, type=int)
