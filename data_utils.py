@@ -313,14 +313,18 @@ def build_embedding_matrix(vocab, embed_dim, data_file):
         print('loading embedding matrix:', data_file)
         embedding_matrix = pickle.load(open(data_file, 'rb'))
     else:
-        print('loading word vectors...')
         embedding_matrix = np.zeros((len(vocab), embed_dim))
         fname = './glove/glove.840B.300d.txt'
-        word_vec = _load_wordvec(fname, embed_dim, vocab)
-        for i in range(len(vocab)):
-            vec = word_vec.get(vocab.id_to_word(i))
-            if vec is not None:
-                embedding_matrix[i] = vec
+        if os.path.exists(fname):
+            print('loading word vectors...')
+            word_vec = _load_wordvec(fname, embed_dim, vocab)
+            for i in range(len(vocab)):
+                vec = word_vec.get(vocab.id_to_word(i))
+                if vec is not None:
+                    embedding_matrix[i] = vec
+        else:
+            print('warning: {} not found, using random embeddings instead.'.format(fname))
+            embedding_matrix[1:] = np.random.uniform(-0.25, 0.25, (len(vocab) - 1, embed_dim))
         pickle.dump(embedding_matrix, open(data_file, 'wb'))
     return embedding_matrix
 
