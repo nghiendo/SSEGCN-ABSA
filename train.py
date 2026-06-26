@@ -62,6 +62,7 @@ class Instructor:
         self.current_weight_teacher_logits = None
         self.current_primary_teacher_logits = None
         self.current_aux_teacher_logits = None
+        self.current_blended_teacher_probs = None
 
         if opt.model_name == 'ssegcnbertstudent':
             self._build_student_kd_pipeline()
@@ -321,12 +322,17 @@ class Instructor:
 
         return optimizer
 
-    def _kd_instance_weights(self, teacher_logits, student_logits):
+    def _teacher_probs(self, teacher_logits, temperature=1.0, probs_override=None):
+        if probs_override is not None:
+            return probs_override
+        return F.softmax(teacher_logits / max(temperature, 1e-6), dim=-1)
+
+    def _kd_instance_weights(self, teacher_logits, student_logits, teacher_probs_override=None):
         num_classes = teacher_logits.size(-1)
         normalizer = float(np.log(num_classes)) if num_classes > 1 else 1.0
 
         with torch.no_grad():
-            teacher_probs = F.softmax(teacher_logits, dim=-1)
+            teacher_probs = self._teacher_probs(teacher_logits, probs_override=teacher_probs_override)
             teacher_entropy = -(teacher_probs * torch.log(teacher_probs.clamp_min(1e-12))).sum(dim=-1)
             teacher_confidence = 1.0 - (teacher_entropy / normalizer)
 
@@ -369,6 +375,7 @@ class Instructor:
 
     def _blend_teacher_logits(self, teacher_logits, aux_teacher_logits):
         if aux_teacher_logits is None:
+            self.current_blended_teacher_probs = None
             return teacher_logits
 
         if self.opt.aux_teacher_blend_space == 'probs':
@@ -402,6 +409,7 @@ class Instructor:
                 aux_weight = aux_weight * confidence_gate * disagreement
 
         blended_probs = (1.0 - aux_weight) * teacher_probs + aux_weight * aux_teacher_probs
+        self.current_blended_teacher_probs = blended_probs
         return torch.log(blended_probs.clamp_min(1e-12))
 
     def _standardize_logits(self, logits):
@@ -626,7 +634,10 @@ class Instructor:
     def _get_feature_target(self, teacher_logits, teacher_features):
         if self.opt.kd_feature_mode == 'teacher_hidden':
             return teacher_features
-        teacher_probs = F.softmax(teacher_logits, dim=-1)
+        teacher_probs = self._teacher_probs(
+            teacher_logits,
+            probs_override=self.current_blended_teacher_probs,
+        )
         return teacher_probs @ self.teacher_model.classifier.weight
 
     def _feature_kd_loss(self, student_features, feature_target, sample_weights):
@@ -642,9 +653,15 @@ class Instructor:
     def _kd_loss(self, student_logits, student_features, teacher_logits, teacher_features, targets, temperature):
         if self.opt.kd_use_instance_weighting:
             weight_teacher_logits = teacher_logits
+            weight_teacher_probs = self.current_blended_teacher_probs
             if self.opt.kd_weight_use_primary_teacher and self.current_weight_teacher_logits is not None:
                 weight_teacher_logits = self.current_weight_teacher_logits
-            sample_weights = self._kd_instance_weights(weight_teacher_logits, student_logits)
+                weight_teacher_probs = None
+            sample_weights = self._kd_instance_weights(
+                weight_teacher_logits,
+                student_logits,
+                teacher_probs_override=weight_teacher_probs,
+            )
         else:
             sample_weights = None
 
@@ -681,7 +698,11 @@ class Instructor:
             tckd_loss = kd_logits_loss.new_tensor(0.0)
             nckd_loss = kd_logits_loss.new_tensor(0.0)
         else:
-            soft_targets = F.softmax(prepared_teacher_logits / temperature, dim=-1)
+            soft_targets = self._teacher_probs(
+                prepared_teacher_logits,
+                temperature=temperature,
+                probs_override=self.current_blended_teacher_probs,
+            )
             student_log_probs = F.log_softmax(prepared_student_logits / temperature, dim=-1)
             kd_logits_per_sample = F.kl_div(student_log_probs, soft_targets, reduction='none').sum(dim=-1)
             kd_logits_per_sample = kd_logits_per_sample * (temperature ** 2)
@@ -853,6 +874,7 @@ class Instructor:
                 self.current_weight_teacher_logits = None
                 self.current_primary_teacher_logits = None
                 self.current_aux_teacher_logits = None
+                self.current_blended_teacher_probs = None
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
