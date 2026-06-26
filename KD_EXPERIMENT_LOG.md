@@ -408,6 +408,31 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5475`, `macro_f1=0.3225`
      - Conclusion: once the aux-teacher architecture mismatch is fixed, the deeper warm-start student still collapses badly, so late-stage depth expansion is not viable in the current optimization setup.
 
+50. `c2ddda6` `exp50: add hidden40 expansion warm-start`
+   - Script: `experiments/run_kd_laptop_wider_hidden40_expand_short.sh`
+   - Config delta: add a structured student expansion loader in `train.py` and widen the student hidden size from `32` to `40` while overlap-copying the best checkpoint into the larger model
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.5854`, `macro_f1=0.5226`
+     - Diagnostic: this first width-expansion run instantiated the auxiliary student teacher at `hidden_dim=40`, so the `hidden_dim=32` checkpoint only partially loaded into the aux teacher
+     - Conclusion: the new expansion loader works for the student itself, but this first widened-student result is not a fair dual-teacher evaluation because the auxiliary teacher architecture was mismatched.
+
+51. `106206e` `exp51: add fixed-aux hidden40 expansion warm-start`
+   - Script: `experiments/run_kd_laptop_wider_hidden40_expand_fixed_aux_short.sh`
+   - Config delta: add `--teacher_student_hidden_dim`, `--teacher_student_pos_dim`, and `--teacher_student_post_dim` so the auxiliary student teacher can keep the original `32/8/8` architecture while the student is widened to `40/8/8`
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.5649`, `macro_f1=0.5088`
+     - Conclusion: once the auxiliary teacher width mismatch is fixed, the widened student still falls far below the baseline, so simple width expansion with overlap-copy initialization is not sufficient.
+
+52. `8450546` `exp52: add hidden40 logit-only expansion warm-start`
+   - Script: `experiments/run_kd_laptop_wider_hidden40_logits_expand_short.sh`
+   - Config delta: keep the widened `hidden_dim=40` student with expansion init and the fixed-width auxiliary teacher, but nearly remove feature KD by setting `kd_gamma=0.0`
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.5570`, `macro_f1=0.5094`
+     - Conclusion: the widened student remains poor even when feature KD is removed, so the failure is not just a feature-alignment issue; the broader width-expansion recipe itself is unstable.
+
 Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
