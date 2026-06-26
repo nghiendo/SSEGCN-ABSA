@@ -59,6 +59,7 @@ class Instructor:
         self.student_input_cols = None
         self.teacher_input_cols = None
         self.aux_teacher_input_cols = None
+        self.current_weight_teacher_logits = None
 
         if opt.model_name == 'ssegcnbertstudent':
             self._build_student_kd_pipeline()
@@ -622,7 +623,10 @@ class Instructor:
 
     def _kd_loss(self, student_logits, student_features, teacher_logits, teacher_features, targets, temperature):
         if self.opt.kd_use_instance_weighting:
-            sample_weights = self._kd_instance_weights(teacher_logits, student_logits)
+            weight_teacher_logits = teacher_logits
+            if self.opt.kd_weight_use_primary_teacher and self.current_weight_teacher_logits is not None:
+                weight_teacher_logits = self.current_weight_teacher_logits
+            sample_weights = self._kd_instance_weights(weight_teacher_logits, student_logits)
         else:
             sample_weights = None
 
@@ -818,13 +822,17 @@ class Instructor:
                 self.current_projected_student_token_states = None
                 self.current_teacher_word_states = None
                 self.current_word_mask = None
+                self.current_weight_teacher_logits = None
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
+                    primary_teacher_logits = teacher_logits
                     teacher_features = self.teacher_model.encode(teacher_inputs)
                     if self.aux_teacher_model is not None:
                         aux_teacher_logits, _ = self.aux_teacher_model(aux_teacher_inputs)
                         teacher_logits = self._blend_teacher_logits(teacher_logits, aux_teacher_logits)
+                    if self.opt.kd_weight_use_primary_teacher:
+                        self.current_weight_teacher_logits = primary_teacher_logits
 
                 if self.opt.kd_token_relation_weight > 0 or self.opt.kd_token_hidden_weight > 0:
                     student_lengths = sample_batched['length'].to(self.opt.device).long()
@@ -1174,6 +1182,7 @@ def main():
     parser.add_argument('--kd_token_hidden_weight', default=0.0, type=float)
     parser.add_argument('--kd_token_hidden_loss', default='cosine', type=str, choices=['mse', 'cosine'])
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--kd_weight_use_primary_teacher', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_hidden_dim', default=32, type=int)
