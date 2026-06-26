@@ -130,6 +130,7 @@ class Instructor:
         bert_tokenizer = Tokenizer4BertGCN(self.opt.max_length, self.opt.pretrained_bert_name)
 
         self.model = self.opt.model_class(embedding_matrix, self.opt).to(self.opt.device)
+        self._maybe_load_student_checkpoint()
 
         train_sentence = SentenceDataset(self.opt.dataset_file['train'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
         test_sentence = SentenceDataset(self.opt.dataset_file['test'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
@@ -144,6 +145,15 @@ class Instructor:
         self.student_input_cols = INPUT_COLSES['ssegcn']
         self.teacher_input_cols = INPUT_COLSES['ssegcnbert']
         self._load_teacher_model()
+
+    def _maybe_load_student_checkpoint(self):
+        init_path = self.opt.student_init_path
+        if not init_path:
+            return
+
+        logger.info('Loading student checkpoint: {}'.format(init_path))
+        state_dict = torch.load(init_path, map_location=self.opt.device)
+        self.model.load_state_dict(state_dict, strict=True)
 
     def _load_teacher_model(self):
         teacher_path = self.opt.teacher_path
@@ -812,7 +822,8 @@ class Instructor:
         max_f1_overall = 0
         model_path = ''  # Initialize model_path
         if self.opt.model_name == 'ssegcnbertstudent':
-            self._reset_params()
+            if not self.opt.student_init_path:
+                self._reset_params()
             max_test_acc, max_f1, model_path = self._train_kd(criterion, optimizer, max_test_acc_overall)
         elif 'bert' not in self.opt.model_name:
             self._reset_params()
@@ -959,6 +970,7 @@ def main():
     parser.add_argument('--student_output_dropout', default=0.2, type=float)
     parser.add_argument('--student_lr', default=1e-3, type=float)
     parser.add_argument('--student_freeze_word_emb', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--student_init_path', default=None, type=str)
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
