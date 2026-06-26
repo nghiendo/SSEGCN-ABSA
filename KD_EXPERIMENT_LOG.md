@@ -557,6 +557,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7318`
    - Conclusion: once the DIST branch crossed into the new optimum, extra hard-label pressure and lower LR only pulled it back toward the old plateau; `exp64` remains the strongest checkpoint by a clear margin.
 
+66. `8bfed48` `exp66: add shallow bert dist patient kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dist_patient_short.sh`
+   - Config delta: add PatientKD-style intermediate BERT hidden-layer distillation support, then continue from the `exp64` best checkpoint with the same winning DIST setup while adding a light hidden-layer cosine loss (`kd_hidden_layer_weight=0.02`, `kd_hidden_layer_map=last`) to test whether multi-layer supervision can improve the already-strong shallow BERT student
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7323`
+     - Best observed accuracy during training/final selection: `acc=0.7706`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7323`
+   - Conclusion: this first PatientKD-style hidden-layer continuation does not beat the simpler DIST optimum; additional intermediate supervision appears to over-constrain the local best region, so `exp64` remains the strongest model.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
