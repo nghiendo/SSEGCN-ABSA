@@ -342,6 +342,12 @@ class Instructor:
     def _weighted_mean(self, values, weights):
         return (values * weights).sum() / weights.sum().clamp_min(1e-12)
 
+    def _persist_best_model(self, model_path):
+        if not model_path or self.best_model is None:
+            return
+        torch.save(self.best_model.state_dict(), model_path)
+        logger.info('>> saved: {}'.format(model_path))
+
     def _blend_teacher_logits(self, teacher_logits, aux_teacher_logits):
         if aux_teacher_logits is None:
             return teacher_logits
@@ -864,7 +870,7 @@ class Instructor:
                             model_path = './state_dict/{}_{}_acc_{:.4f}_f1_{:.4f}'.format(
                                 self.opt.model_name, self.opt.dataset, test_acc, f1)
                             self.best_model = copy.deepcopy(self.model)
-                            logger.info('>> saved: {}'.format(model_path))
+                            self._persist_best_model(model_path)
                     log_message = (
                         'loss: {:.4f}, hard: {:.4f}, kd_total: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
                             loss.item(),
@@ -956,7 +962,7 @@ class Instructor:
                             os.makedirs('./state_dict', exist_ok=True)
                             model_path = './state_dict/{}_{}_acc_{:.4f}_f1_{:.4f}'.format(self.opt.model_name, self.opt.dataset, test_acc, f1)
                             self.best_model = copy.deepcopy(self.model)
-                            logger.info('>> saved: {}'.format(model_path))
+                            self._persist_best_model(model_path)
                     if f1 > max_f1:
                         max_f1 = f1
                     logger.info('loss: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(loss.item(), train_acc, test_acc, f1))
@@ -1027,8 +1033,7 @@ class Instructor:
         max_test_acc_overall = max(max_test_acc, max_test_acc_overall)
         max_f1_overall = max(max_f1, max_f1_overall)
         if model_path and hasattr(self, 'best_model'):
-            torch.save(self.best_model.state_dict(), model_path)
-        logger.info('>> saved: {}'.format(model_path))
+            self._persist_best_model(model_path)
         logger.info('#' * 60)
         logger.info('max_test_acc_overall:{}'.format(max_test_acc_overall))
         logger.info('max_f1_overall:{}'.format(max_f1_overall))
