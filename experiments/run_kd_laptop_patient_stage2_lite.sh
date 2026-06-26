@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+python ./train.py \
+  --model_name ssegcnbertstudent \
+  --dataset laptop \
+  --seed 1000 \
+  --num_epoch 3 \
+  --batch_size 16 \
+  --log_step 10 \
+  --max_length 100 \
+  --vocab_dir ./dataset/Laptops_corenlp \
+  --student_hidden_dim 32 \
+  --student_pos_dim 8 \
+  --student_post_dim 8 \
+  --student_lr 1e-4 \
+  --student_freeze_word_emb false \
+  --student_init_path ./state_dict/ssegcnbertstudent_laptop_acc_0.6883_f1_0.6325 \
+  --kd_temperature 4.0 \
+  --kd_alpha 0.55 \
+  --kd_beta 0.3 \
+  --kd_gamma 0.15 \
+  --kd_feature_loss cosine \
+  --kd_warmup_epochs 1 \
+  --kd_ramp_epochs 2 \
+  --kd_scale_schedule cosine \
+  --kd_token_hidden_weight 0.02 \
+  --kd_token_hidden_loss cosine \
+  --cuda 0
