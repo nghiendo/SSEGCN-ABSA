@@ -245,16 +245,50 @@ class Instructor:
 
         return optimizer
 
+    def _kd_instance_weights(self, teacher_logits, student_logits):
+        num_classes = teacher_logits.size(-1)
+        normalizer = float(np.log(num_classes)) if num_classes > 1 else 1.0
+
+        with torch.no_grad():
+            teacher_probs = F.softmax(teacher_logits, dim=-1)
+            teacher_entropy = -(teacher_probs * torch.log(teacher_probs.clamp_min(1e-12))).sum(dim=-1)
+            teacher_confidence = 1.0 - (teacher_entropy / normalizer)
+
+            student_probs = F.softmax(student_logits, dim=-1)
+            student_entropy = -(student_probs * torch.log(student_probs.clamp_min(1e-12))).sum(dim=-1)
+            student_uncertainty = student_entropy / normalizer
+
+            sample_weights = teacher_confidence * student_uncertainty
+            sample_weights = sample_weights.clamp_min(self.opt.kd_min_weight)
+
+            if self.opt.kd_normalize_weights:
+                sample_weights = sample_weights / sample_weights.mean().clamp_min(1e-12)
+
+        return sample_weights
+
+    def _weighted_mean(self, values, weights):
+        return (values * weights).sum() / weights.sum().clamp_min(1e-12)
+
     def _kd_loss(self, student_logits, student_features, teacher_logits, temperature):
         soft_targets = F.softmax(teacher_logits / temperature, dim=-1)
         student_log_probs = F.log_softmax(student_logits / temperature, dim=-1)
-        kd_logits_loss = F.kl_div(student_log_probs, soft_targets, reduction='batchmean') * (temperature ** 2)
+        if self.opt.kd_use_instance_weighting:
+            sample_weights = self._kd_instance_weights(teacher_logits, student_logits)
+            kd_logits_per_sample = F.kl_div(student_log_probs, soft_targets, reduction='none').sum(dim=-1)
+            kd_logits_loss = self._weighted_mean(kd_logits_per_sample, sample_weights) * (temperature ** 2)
+        else:
+            sample_weights = None
+            kd_logits_loss = F.kl_div(student_log_probs, soft_targets, reduction='batchmean') * (temperature ** 2)
 
         with torch.no_grad():
             teacher_probs = F.softmax(teacher_logits, dim=-1)
         feature_target = teacher_probs @ self.teacher_model.classifier.weight
-        kd_feature_loss = F.mse_loss(student_features, feature_target)
-        return kd_logits_loss, kd_feature_loss
+        if sample_weights is not None:
+            kd_feature_per_sample = F.mse_loss(student_features, feature_target, reduction='none').mean(dim=-1)
+            kd_feature_loss = self._weighted_mean(kd_feature_per_sample, sample_weights)
+        else:
+            kd_feature_loss = F.mse_loss(student_features, feature_target)
+        return kd_logits_loss, kd_feature_loss, sample_weights
 
     def _train_kd(self, criterion, optimizer, max_test_acc_overall=0):
         max_test_acc = 0
@@ -282,7 +316,7 @@ class Instructor:
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
 
                 hard_loss = criterion(student_logits, targets)
-                kd_logits_loss, kd_feature_loss = self._kd_loss(
+                kd_logits_loss, kd_feature_loss, sample_weights = self._kd_loss(
                     student_logits,
                     projected_features,
                     teacher_logits,
@@ -312,7 +346,7 @@ class Instructor:
                             logger.info('>> saved: {}'.format(model_path))
                     if f1 > max_f1:
                         max_f1 = f1
-                    logger.info(
+                    log_message = (
                         'loss: {:.4f}, hard: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
                             loss.item(),
                             hard_loss.item(),
@@ -323,6 +357,13 @@ class Instructor:
                             f1,
                         )
                     )
+                    if sample_weights is not None:
+                        log_message += ', kd_w_mean: {:.4f}, kd_w_min: {:.4f}, kd_w_max: {:.4f}'.format(
+                            sample_weights.mean().item(),
+                            sample_weights.min().item(),
+                            sample_weights.max().item(),
+                        )
+                    logger.info(log_message)
         return max_test_acc, max_f1, model_path
 
     
@@ -535,6 +576,9 @@ def main():
     parser.add_argument('--kd_alpha', default=0.4, type=float)
     parser.add_argument('--kd_beta', default=0.4, type=float)
     parser.add_argument('--kd_gamma', default=0.2, type=float)
+    parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--kd_min_weight', default=0.1, type=float)
+    parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_hidden_dim', default=32, type=int)
     parser.add_argument('--student_pos_dim', default=8, type=int)
     parser.add_argument('--student_post_dim', default=8, type=int)
