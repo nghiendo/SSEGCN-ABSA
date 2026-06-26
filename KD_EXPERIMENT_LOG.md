@@ -575,6 +575,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7335`
    - Conclusion: stripping token-level KD almost entirely lets the student recover teacher-level accuracy again, but still does not beat the `exp64` optimum; a small amount of token-hidden regularization appears to remain helpful in the best DIST regime.
 
+68. `4bfba73` `exp68: balance shallow bert dist terms`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dist_balance_short.sh`
+   - Config delta: continue from the `exp64` best checkpoint, keep the same DIST-based recipe family, but rebalance the relation-aware logit terms toward a more even inter/intra split (`kd_dist_inter_weight=1.4`, `kd_dist_intra_weight=1.6`), lower `kd_beta` slightly to `0.11`, and trim token-hidden KD a bit to test whether the `exp64` optimum can be sharpened rather than merely reproduced
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7737_f1_0.7360`
+     - Best observed accuracy during training/final selection: `acc=0.7737`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7360`
+   - Conclusion: this balanced DIST variant successfully reproduces the current best student but does not improve on it; the `exp64` recipe remains the strongest known checkpoint, and the search region around it appears very flat.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
