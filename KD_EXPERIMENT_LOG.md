@@ -566,6 +566,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7323`
    - Conclusion: this first PatientKD-style hidden-layer continuation does not beat the simpler DIST optimum; additional intermediate supervision appears to over-constrain the local best region, so `exp64` remains the strongest model.
 
+67. `b60cba5` `exp67: ablate shallow bert dist token kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dist_notoken_short.sh`
+   - Config delta: continue from the `exp64` best checkpoint, keep the winning DIST setup intact, but nearly remove token-hidden KD (`kd_token_hidden_weight=0.002`) to test whether the new optimum is now dominated by relation-aware logit KD alone rather than by residual token-level regularization
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7722_f1_0.7335`
+     - Best observed accuracy during training/final selection: `acc=0.7722`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7335`
+   - Conclusion: stripping token-level KD almost entirely lets the student recover teacher-level accuracy again, but still does not beat the `exp64` optimum; a small amount of token-hidden regularization appears to remain helpful in the best DIST regime.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
