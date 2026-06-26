@@ -373,6 +373,11 @@ class Instructor:
 
             if self.opt.aux_teacher_blend_mode == 'confidence':
                 aux_weight = aux_weight * confidence_gate
+            elif self.opt.aux_teacher_blend_mode == 'teacher_uncertainty':
+                teacher_entropy = -(teacher_probs * torch.log(teacher_probs.clamp_min(1e-12))).sum(dim=-1, keepdim=True)
+                max_entropy = float(np.log(teacher_probs.size(-1))) if teacher_probs.size(-1) > 1 else 1.0
+                uncertainty_gate = teacher_entropy / max_entropy
+                aux_weight = aux_weight * uncertainty_gate * aux_teacher_conf
             else:
                 disagreement = (teacher_probs - aux_teacher_probs).abs().sum(dim=-1, keepdim=True) / 2.0
                 aux_weight = aux_weight * confidence_gate * disagreement
@@ -1134,7 +1139,7 @@ def main():
     parser.add_argument('--aux_teacher_path', default=None, type=str)
     parser.add_argument('--aux_teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
     parser.add_argument('--aux_teacher_logit_weight', default=0.0, type=float)
-    parser.add_argument('--aux_teacher_blend_mode', default='fixed', type=str, choices=['fixed', 'confidence', 'disagreement'])
+    parser.add_argument('--aux_teacher_blend_mode', default='fixed', type=str, choices=['fixed', 'confidence', 'disagreement', 'teacher_uncertainty'])
     parser.add_argument('--aux_teacher_blend_space', default='logits', type=str, choices=['logits', 'probs'])
     parser.add_argument('--aux_teacher_gate_temperature', default=0.1, type=float)
     parser.add_argument('--teacher_feature_dim', default=100, type=int)
