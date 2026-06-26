@@ -8,8 +8,8 @@ class SSEGCNStudentClassifier(nn.Module):
         super().__init__()
         self.opt = opt
         self.encoder = TinySSEGCNEncoder(embedding_matrix, opt)
-        self.classifier = nn.Linear(opt.student_hidden_dim * 2, opt.polarities_dim)
-        self.distill_proj = nn.Linear(opt.student_hidden_dim * 2, opt.teacher_feature_dim)
+        self.classifier = nn.Linear(opt.student_hidden_dim * 4, opt.polarities_dim)
+        self.distill_proj = nn.Linear(opt.student_hidden_dim * 4, opt.teacher_feature_dim)
 
     def encode(self, inputs):
         return self.encoder(inputs)
