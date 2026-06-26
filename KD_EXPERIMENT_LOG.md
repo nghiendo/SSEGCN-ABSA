@@ -318,6 +318,30 @@ Experiments:
      - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6316`
      - Conclusion: the exp36 gain does not stack through an immediate second identical pass; it appears to be a narrow early improvement rather than a repeatable iterative climb.
 
+39. `e9d31d9` `exp39: add minilm dual-teacher aux025 polish`
+   - Script: `experiments/run_kd_laptop_minilm_dual_teacher_aux025_short.sh`
+   - Config delta: start from the `0.6350` best checkpoint, keep the gentle dual-teacher polish setup, reduce the auxiliary student-teacher weight to `0.25`, and add an ultra-light MiniLM-style token relation term
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6316`
+     - Conclusion: even an almost negligible relation loss still slides back into the same lower-F1 band, so MiniLM-style structure transfer remains too disruptive at this stage.
+
+40. `ef28306` `exp40: add teacher gentle polish distillation`
+   - Script: `experiments/run_kd_laptop_teacher_gentle_polish_short.sh`
+   - Config delta: keep the same gentle polish schedule but remove the auxiliary student teacher, leaving only the BERT teacher
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6255`
+     - Conclusion: the stronger late-stage checkpoint still benefits from the dual-teacher setup; teacher-only polishing loses too much F1.
+
+41. `9f79197` `exp41: add ultra-gentle dual-teacher polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_ultra_gentle_polish_short.sh`
+   - Config delta: continue from the `0.6350` best checkpoint, keep confidence-gated dual teachers, and make the polish pass even lighter by reducing KD emphasis further
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6266`
+     - Conclusion: pushing the recipe to be even gentler removes too much useful teacher signal and falls well short of the current best.
+
 Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
