@@ -375,6 +375,39 @@ Experiments:
      - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6294`
      - Conclusion: filtering KD by teacher agreement is coherent and stable, but on this checkpoint it reduces useful signal more than harmful disagreement and performs worse than the simpler gentle recipe.
 
+46. `1960bb2` `exp46: fix dual-teacher prob-blend targets`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_probfix_short.sh`
+   - Config delta: change `train.py` so probability-space dual-teacher blending feeds the blended probabilities directly into the KL target instead of implicitly applying the KD temperature a second time
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6258`
+     - Conclusion: the previous probability-space recipe was relying on the extra target softening; removing it cleanly makes the dual-teacher pass substantially weaker.
+
+47. `8079bba` `exp47: add blended-target temperature control`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_blendedtemp2_short.sh`
+   - Config delta: keep the new probability-target path but add an explicit `--kd_blended_target_temperature` and test an intermediate value `2.0`
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6266`
+     - Conclusion: partially restoring the extra softening recovers a little from exp46, but it still remains far below the original `0.6350` best.
+
+48. `3d27286` `exp48: add deeper warm-start student polish`
+   - Script: `experiments/run_kd_laptop_deeper_student_warmstart_short.sh`
+   - Config delta: increase the student to two LSTM layers while partially warm-starting compatible weights from the `0.6350` checkpoint
+   - Result:
+     - Early-stopped after severe collapse
+     - Best observed checkpoint before stop: `acc=0.5396`, `macro_f1=0.3225`
+     - Diagnostic: the auxiliary student teacher was unintentionally instantiated with the deeper two-layer architecture too, so the one-layer checkpoint only partially loaded into the aux teacher
+     - Conclusion: the first deeper-student attempt was invalid as a fair dual-teacher test and clearly unstable.
+
+49. `dd89516` `exp49: add fixed-aux deeper warm-start student`
+   - Script: `experiments/run_kd_laptop_deeper_student_warmstart_fixed_aux_short.sh`
+   - Config delta: add `--teacher_student_encoder_layers` so the auxiliary student teacher can stay one-layer while the student is trained as a two-layer model, then rerun the deeper warm-start experiment
+   - Result:
+     - Early-stopped after severe collapse
+     - Best observed checkpoint before stop: `acc=0.5475`, `macro_f1=0.3225`
+     - Conclusion: once the aux-teacher architecture mismatch is fixed, the deeper warm-start student still collapses badly, so late-stage depth expansion is not viable in the current optimization setup.
+
 Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
