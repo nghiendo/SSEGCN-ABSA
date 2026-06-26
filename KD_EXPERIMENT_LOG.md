@@ -593,6 +593,26 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7439`
    - Conclusion: the repaired local restaurant teacher is now reproducible and ready for cross-dataset validation of the `exp64` DIST recipe; its headline metrics remain below the earlier paper-level teacher numbers, but it satisfies the current constraint to distill directly from the available local teacher.
 
+70. `1132384` `exp70: add cross-dataset exp64 validation chain`
+   - Scripts:
+     - `experiments/run_kd_shallowbert6_exp64_chain_short.sh`
+     - `experiments/run_kd_restaurant_shallowbert6_dist_short.sh`
+     - `experiments/run_kd_twitter_shallowbert6_dist_short.sh`
+     - `experiments/run_teacher_twitter_short.sh`
+   - Config delta: convert the laptop-only `exp64` win into a reusable multi-stage chain that faithfully reproduces the actual warm-start protocol behind `exp54 -> exp61 -> exp64`, then add the missing local twitter teacher recipe and dataset-specific wrappers so any student that matches or beats its teacher can now be validated across all three datasets under the same method family
+   - Result:
+     - Infrastructure commit only; no student metrics attached yet
+   - Conclusion: the repository now has the correct control scripts to validate the winning shallow-BERT DIST method across `laptop`, `restaurant`, and `twitter` without falsely treating a DIST-from-scratch run as equivalent to the true `exp64` continuation protocol.
+
+71. `cf52486` `exp71: recreate local twitter teacher baseline`
+   - Script: `experiments/run_teacher_twitter_short.sh`
+   - Config delta: run the local one-epoch `ssegcnbert` teacher recipe directly on `Tweets_corenlp` so the cross-dataset validation chain has a matching local twitter teacher checkpoint instead of relying on a missing or paper-only teacher artifact
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbert_twitter_acc_0.7386_f1_0.7317`
+     - Best observed accuracy during training/final selection: `acc=0.7386`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7317`
+   - Conclusion: the local twitter teacher is now reproducible and substantially stronger than the earlier short-run intermediates, giving the `exp64` student chain a realistic cross-dataset validation target on twitter.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
