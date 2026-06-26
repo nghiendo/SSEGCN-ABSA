@@ -548,6 +548,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7360`
    - Conclusion: this relation-aware logit distillation unlocks a new regime; the shallow BERT student now surpasses the teacher on both headline metrics, beating teacher accuracy by `0.0015` and extending the macro-F1 lead to `0.0199`.
 
+65. `bd9a51f` `exp65: push shallow bert dist polish`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dist_push_short.sh`
+   - Config delta: continue from the new `exp64` best checkpoint, lower the BERT LR to `2e-6`, raise hard-label weight to `0.78`, reduce DIST weight slightly (`kd_beta=0.10`), emphasize intra-class structure more (`kd_dist_intra_weight=2.5`), and lighten token-hidden KD to `0.008` for a conservative polish stage
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7318`
+     - Best observed accuracy during training/final selection: `acc=0.7706`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7318`
+   - Conclusion: once the DIST branch crossed into the new optimum, extra hard-label pressure and lower LR only pulled it back toward the old plateau; `exp64` remains the strongest checkpoint by a clear margin.
+
 Current best experiment:
 - Commit: `97b5e8e`
 - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
