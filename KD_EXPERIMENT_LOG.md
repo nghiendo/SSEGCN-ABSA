@@ -510,7 +510,18 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7278`
    - Conclusion: the student keeps improving on both headline metrics versus the previous best and remains clearly above the teacher on macro F1, but the remaining accuracy gap persists even under stronger hard-label pressure.
 
+61. `9764e9f` `exp61: sweep shallow bert hard-label polish`
+   - Scripts:
+     - `experiments/run_kd_laptop_shallowbert6_hardlabel_edge2_short.sh`
+     - `experiments/run_kd_laptop_shallowbert6_hiddenlite_polish_short.sh`
+   - Config delta: sweep two very local continuations from the `exp60` best checkpoint with even lower BERT LR and lighter token-hidden KD; the winning branch pushes hard-label emphasis slightly further (`kd_alpha=0.72`, `kd_beta=0.23`, `kd_token_hidden_weight=0.015`)
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7317`
+     - Best observed accuracy during training/final selection: `acc=0.7706`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7317`
+   - Conclusion: the local hard-label polish still had headroom; the student now comes within `0.0016` accuracy of the teacher while extending its macro-F1 lead further.
+
 Current best experiment:
-- Commit: `75d896e`
-- Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7674_f1_0.7278`
+- Commit: `9764e9f`
+- Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge2_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7317`
