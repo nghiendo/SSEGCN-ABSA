@@ -342,6 +342,39 @@ Experiments:
      - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6266`
      - Conclusion: pushing the recipe to be even gentler removes too much useful teacher signal and falls well short of the current best.
 
+42. `72f69bd` `exp42: add lagged-aux dual-teacher polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_lagged_aux_polish_short.sh`
+   - Config delta: initialize from the `0.6350` best checkpoint but switch the auxiliary student teacher back to the previous `0.6339` checkpoint to reintroduce a slightly older self-teacher signal
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6316`
+     - Conclusion: the gain from exp36 was not caused by simply using a lagged self-teacher; replaying that idea from the stronger checkpoint still lands below the best.
+
+43. `4ae94a9` `exp43: add dual-teacher gentle ramp polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_gentle_ramp2_short.sh`
+   - Config delta: keep the current best checkpoint and dual-teacher setup, but reduce LR to `3e-5` and spread KD across a two-epoch cosine ramp instead of a one-epoch full-strength pass
+   - Result:
+     - Completed two short epochs and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6291`
+     - Conclusion: stretching the polish over two gentler epochs suppresses the already narrow early peak rather than improving it.
+
+44. `328a6e3` `exp44: add gentle primary-weight dual-teacher polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_primary_weight_gentle_short.sh`
+   - Config delta: keep the gentle one-epoch dual-teacher pass, lower the aux blend slightly, and compute per-instance KD weights from the primary BERT teacher
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6316`
+     - Observed `kd_w_min < kd_w_max`, confirming primary-teacher weighting became active again
+     - Conclusion: restoring meaningful instance weighting changes the optimization dynamics, but it still does not recover the `0.6350` peak.
+
+45. `3fc656a` `exp45: add agreement-weighted gentle dual-teacher polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_agreement_weighted_gentle_short.sh`
+   - Config delta: add a new teacher-agreement weighting term in `train.py` so KD is emphasized more on samples where the BERT teacher and auxiliary student teacher agree
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6294`
+     - Conclusion: filtering KD by teacher agreement is coherent and stable, but on this checkpoint it reduces useful signal more than harmful disagreement and performs worse than the simpler gentle recipe.
+
 Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
