@@ -433,6 +433,15 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5570`, `macro_f1=0.5094`
      - Conclusion: the widened student remains poor even when feature KD is removed, so the failure is not just a feature-alignment issue; the broader width-expansion recipe itself is unstable.
 
+53. `2241a8d` `exp53: add zero-preserve hidden40 expansion`
+   - Script: `experiments/run_kd_laptop_wider_hidden40_zero_preserve_short.sh`
+   - Config delta: keep the widened `hidden_dim=40` student and fixed-width auxiliary teacher, but change expansion initialization to `zero_preserve`, which zeroes new dimensions before copying the old checkpoint into the shared subspace
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.5649`, `macro_f1=0.5328`
+     - Diagnostic: `kd_feature` dropped sharply versus exp51/exp52, confirming the safer initialization made the widened student much closer to the original function at the start
+     - Conclusion: even with near-function-preserving expansion, the widened student still lands far below the `0.6350` checkpoint, so late-stage width expansion is not a viable path here.
+
 Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
