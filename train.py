@@ -216,6 +216,9 @@ class Instructor:
                 loaded.append(key)
                 continue
 
+            if self.opt.student_expand_init_mode == 'zero_preserve':
+                target_value.zero_()
+
             can_expand_lstm = (
                 key.startswith('encoder.encoder.')
                 and target_value.dim() in (1, 2)
@@ -1351,6 +1354,7 @@ def main():
     parser.add_argument('--student_freeze_word_emb', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_init_path', default=None, type=str)
     parser.add_argument('--student_expand_init', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
+    parser.add_argument('--student_expand_init_mode', default='overlap', type=str, choices=['overlap', 'zero_preserve'])
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
