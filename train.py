@@ -520,6 +520,18 @@ class Instructor:
         per_sample = (diff * pair_mask).sum(dim=(1, 2)) / pair_mask.sum(dim=(1, 2)).clamp_min(1.0)
         return per_sample.mean()
 
+    def _token_hidden_kd_loss(self, student_token_states, teacher_word_states, word_mask, sample_weights):
+        if self.opt.kd_token_hidden_loss == 'cosine':
+            per_token = 1.0 - F.cosine_similarity(student_token_states, teacher_word_states, dim=-1)
+        else:
+            per_token = F.mse_loss(student_token_states, teacher_word_states, reduction='none').mean(dim=-1)
+
+        token_mask = word_mask.float()
+        per_sample = (per_token * token_mask).sum(dim=-1) / token_mask.sum(dim=-1).clamp_min(1.0)
+        if sample_weights is not None:
+            return self._weighted_mean(per_sample, sample_weights)
+        return per_sample.mean()
+
     def _get_feature_target(self, teacher_logits, teacher_features):
         if self.opt.kd_feature_mode == 'teacher_hidden':
             return teacher_features
@@ -622,6 +634,15 @@ class Instructor:
                 self.current_word_mask,
             )
 
+        kd_token_hidden_loss = kd_feature_loss.new_tensor(0.0)
+        if self.opt.kd_token_hidden_weight > 0:
+            kd_token_hidden_loss = self._token_hidden_kd_loss(
+                self.current_projected_student_token_states,
+                self.current_teacher_word_states,
+                self.current_word_mask,
+                sample_weights,
+            )
+
         total_loss = (
             self.opt.kd_beta * kd_logits_loss
             + self.opt.kd_gamma * kd_feature_loss
@@ -633,6 +654,7 @@ class Instructor:
             + self.opt.kd_rank_weight * kd_rank_loss
             + kd_proto_loss
             + self.opt.kd_token_relation_weight * kd_token_relation_loss
+            + self.opt.kd_token_hidden_weight * kd_token_hidden_loss
         )
 
         components = {
@@ -651,6 +673,7 @@ class Instructor:
             'kd_proto_align': kd_proto_align,
             'kd_proto_relation': kd_proto_relation,
             'kd_token_relation': kd_token_relation_loss,
+            'kd_token_hidden': kd_token_hidden_loss,
         }
         return total_loss, components, sample_weights
 
@@ -717,6 +740,7 @@ class Instructor:
                 projected_features = self.model.project_for_distill(student_features)
                 student_logits = self.model.classifier(student_features)
                 self.current_student_token_states = None
+                self.current_projected_student_token_states = None
                 self.current_teacher_word_states = None
                 self.current_word_mask = None
 
@@ -724,10 +748,11 @@ class Instructor:
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
                     teacher_features = self.teacher_model.encode(teacher_inputs)
 
-                if self.opt.kd_token_relation_weight > 0:
+                if self.opt.kd_token_relation_weight > 0 or self.opt.kd_token_hidden_weight > 0:
                     student_lengths = sample_batched['length'].to(self.opt.device).long()
                     teacher_tok2ori_map = sample_batched['tok2ori_map'].to(self.opt.device).long()
                     student_token_states, _, _, _, _ = self.model.encode_tokens(student_inputs)
+                    projected_student_token_states = self.model.project_tokens_for_distill(student_token_states)
                     with torch.no_grad():
                         teacher_token_states = self.teacher_model.encode_tokens(teacher_inputs)
 
@@ -737,6 +762,7 @@ class Instructor:
                         student_lengths,
                     )
                     self.current_student_token_states = student_token_states
+                    self.current_projected_student_token_states = projected_student_token_states
                     self.current_teacher_word_states = teacher_word_states
                     self.current_word_mask = word_mask
 
@@ -1062,6 +1088,8 @@ def main():
     parser.add_argument('--kd_proto_weight', default=0.0, type=float)
     parser.add_argument('--kd_proto_relation_weight', default=0.0, type=float)
     parser.add_argument('--kd_token_relation_weight', default=0.0, type=float)
+    parser.add_argument('--kd_token_hidden_weight', default=0.0, type=float)
+    parser.add_argument('--kd_token_hidden_loss', default='cosine', type=str, choices=['mse', 'cosine'])
     parser.add_argument('--kd_use_instance_weighting', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_min_weight', default=0.1, type=float)
     parser.add_argument('--kd_normalize_weights', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))

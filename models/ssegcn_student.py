@@ -10,6 +10,7 @@ class SSEGCNStudentClassifier(nn.Module):
         self.encoder = TinySSEGCNEncoder(embedding_matrix, opt)
         self.classifier = nn.Linear(opt.student_hidden_dim * 4, opt.polarities_dim)
         self.distill_proj = nn.Linear(opt.student_hidden_dim * 4, opt.teacher_feature_dim)
+        self.token_distill_proj = nn.Linear(opt.student_hidden_dim * 2, opt.teacher_feature_dim)
 
     def encode(self, inputs):
         return self.encoder(inputs)
@@ -19,6 +20,9 @@ class SSEGCNStudentClassifier(nn.Module):
 
     def project_for_distill(self, features):
         return self.distill_proj(features)
+
+    def project_tokens_for_distill(self, token_states):
+        return self.token_distill_proj(token_states)
 
     def forward(self, inputs):
         features = self.encode(inputs)
