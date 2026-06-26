@@ -45,6 +45,33 @@ class SSEGCNBertClassifier(nn.Module):
         return logits, None
 
 
+class SSEGCNBertStudentClassifier(nn.Module):
+    def __init__(self, bert, opt):
+        super().__init__()
+        self.opt = opt
+        self.gcn_model = GCNAbsaModel(bert, opt=opt)
+        self.classifier = nn.Linear(100, opt.polarities_dim)
+        self.distill_proj = nn.Identity()
+        self.token_distill_proj = nn.Identity()
+
+    def encode(self, inputs):
+        return self.gcn_model(inputs)
+
+    def encode_tokens(self, inputs):
+        return self.gcn_model.encode_tokens(inputs)
+
+    def project_for_distill(self, features):
+        return self.distill_proj(features)
+
+    def project_tokens_for_distill(self, token_states):
+        return self.token_distill_proj(token_states)
+
+    def forward(self, inputs):
+        outputs1 = self.encode(inputs)
+        logits = self.classifier(outputs1)
+        return logits, None
+
+
 class GCNAbsaModel(nn.Module):
     def __init__(self, bert, opt):
         super().__init__()

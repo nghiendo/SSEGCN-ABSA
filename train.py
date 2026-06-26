@@ -11,6 +11,7 @@ import random
 import logging
 import argparse
 import glob
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,14 +19,14 @@ import numpy as np
 from sklearn import metrics
 from time import strftime, localtime
 from torch.utils.data import DataLoader
-from transformers import BertModel
+from transformers import BertConfig, BertModel
 try:
     from torch.optim import AdamW
 except ImportError:
     from transformers import AdamW
 
 from models.ssegcn import SSEGCNClassifier
-from models.ssegcn_bert import SSEGCNBertClassifier
+from models.ssegcn_bert import SSEGCNBertClassifier, SSEGCNBertStudentClassifier
 from models.ssegcn_student import SSEGCNStudentClassifier
 from data_utils import SentenceDataset, build_tokenizer, build_embedding_matrix, Tokenizer4BertGCN, ABSAGCNData, KDABSADataset
 from prepare_vocab import VocabHelp
@@ -38,6 +39,7 @@ INPUT_COLSES = {
     'ssegcn': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length', 'short_mask'],
     'ssegcnbert': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask', 'short_mask'],
     'ssegcnbertstudent': ['text', 'aspect', 'pos', 'head', 'deprel', 'post', 'mask', 'length', 'short_mask'],
+    'ssegcnbertshallow': ['text_bert_indices', 'bert_segments_ids', 'attention_mask', 'asp_start', 'asp_end', 'src_mask', 'aspect_mask', 'short_mask'],
 }
 
 
@@ -64,11 +66,11 @@ class Instructor:
         self.current_aux_teacher_logits = None
         self.current_blended_teacher_probs = None
 
-        if opt.model_name == 'ssegcnbertstudent':
+        if self._is_kd_student_model(opt.model_name):
             self._build_student_kd_pipeline()
         elif 'bert' in opt.model_name:
             tokenizer = Tokenizer4BertGCN(opt.max_length, opt.pretrained_bert_name)
-            bert = BertModel.from_pretrained(opt.pretrained_bert_name)
+            bert = self._build_bert_backbone(opt.model_name)
             self.model = opt.model_class(bert, opt).to(opt.device)
             trainset = ABSAGCNData(opt.dataset_file['train'], tokenizer, opt=opt)
             testset = ABSAGCNData(opt.dataset_file['test'], tokenizer, opt=opt)
@@ -99,13 +101,26 @@ class Instructor:
             trainset = SentenceDataset(opt.dataset_file['train'], tokenizer, opt=opt, vocab_help=vocab_help)
             testset = SentenceDataset(opt.dataset_file['test'], tokenizer, opt=opt, vocab_help=vocab_help)
 
-        if opt.model_name != 'ssegcnbertstudent':
+        if not self._is_kd_student_model(opt.model_name):
             self.train_dataloader = DataLoader(dataset=trainset, batch_size=opt.batch_size, shuffle=True)
             self.test_dataloader = DataLoader(dataset=testset, batch_size=opt.batch_size)
 
         if opt.device.type == 'cuda' and torch.cuda.is_available():
             logger.info('cuda memory allocated: {}'.format(torch.cuda.memory_allocated()))
         self._print_args()
+
+    def _is_kd_student_model(self, model_name):
+        return model_name in ('ssegcnbertstudent', 'ssegcnbertshallow')
+
+    def _uses_word_inputs(self, model_name):
+        return model_name == 'ssegcnbertstudent'
+
+    def _build_bert_backbone(self, model_name):
+        if model_name == 'ssegcnbertshallow':
+            config = BertConfig.from_pretrained(self.opt.pretrained_bert_name)
+            config.num_hidden_layers = self.opt.student_bert_layers
+            return BertModel(config)
+        return BertModel.from_pretrained(self.opt.pretrained_bert_name)
 
     def _load_word_side_resources(self):
         tokenizer = build_tokenizer(
@@ -132,23 +147,30 @@ class Instructor:
         return tokenizer, embedding_matrix, vocab_help
 
     def _build_student_kd_pipeline(self):
-        word_tokenizer, embedding_matrix, vocab_help = self._load_word_side_resources()
         bert_tokenizer = Tokenizer4BertGCN(self.opt.max_length, self.opt.pretrained_bert_name)
+        if self._uses_word_inputs(self.opt.model_name):
+            word_tokenizer, embedding_matrix, vocab_help = self._load_word_side_resources()
+            self.model = self.opt.model_class(embedding_matrix, self.opt).to(self.opt.device)
+            self._maybe_load_student_checkpoint()
 
-        self.model = self.opt.model_class(embedding_matrix, self.opt).to(self.opt.device)
-        self._maybe_load_student_checkpoint()
+            train_sentence = SentenceDataset(self.opt.dataset_file['train'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
+            test_sentence = SentenceDataset(self.opt.dataset_file['test'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
+            train_bert = ABSAGCNData(self.opt.dataset_file['train'], bert_tokenizer, opt=self.opt)
+            test_bert = ABSAGCNData(self.opt.dataset_file['test'], bert_tokenizer, opt=self.opt)
 
-        train_sentence = SentenceDataset(self.opt.dataset_file['train'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
-        test_sentence = SentenceDataset(self.opt.dataset_file['test'], word_tokenizer, opt=self.opt, vocab_help=vocab_help)
-        train_bert = ABSAGCNData(self.opt.dataset_file['train'], bert_tokenizer, opt=self.opt)
-        test_bert = ABSAGCNData(self.opt.dataset_file['test'], bert_tokenizer, opt=self.opt)
+            trainset = KDABSADataset(train_sentence, train_bert)
+            testset = KDABSADataset(test_sentence, test_bert)
+        else:
+            bert = self._build_bert_backbone(self.opt.model_name)
+            self.model = self.opt.model_class(bert, self.opt).to(self.opt.device)
+            self._maybe_load_student_checkpoint()
+            trainset = ABSAGCNData(self.opt.dataset_file['train'], bert_tokenizer, opt=self.opt)
+            testset = ABSAGCNData(self.opt.dataset_file['test'], bert_tokenizer, opt=self.opt)
 
-        trainset = KDABSADataset(train_sentence, train_bert)
-        testset = KDABSADataset(test_sentence, test_bert)
         self.train_dataloader = DataLoader(dataset=trainset, batch_size=self.opt.batch_size, shuffle=True)
         self.test_dataloader = DataLoader(dataset=testset, batch_size=self.opt.batch_size)
 
-        self.student_input_cols = INPUT_COLSES['ssegcn']
+        self.student_input_cols = INPUT_COLSES[self.opt.model_name]
         self._load_teacher_model()
 
     def _load_state_dict_compat(self, model, state_dict, model_label):
@@ -243,6 +265,58 @@ class Instructor:
         if skipped:
             logger.info('{} skipped keys during expansion load: {}'.format(model_label, skipped))
 
+    def _bert_encoder_layer_count(self, state_dict, prefix='gcn_model.gcn.bert.encoder.layer.'):
+        layer_indices = set()
+        pattern = re.compile(r'^' + re.escape(prefix) + r'(\d+)\.')
+        for key in state_dict.keys():
+            match = pattern.match(key)
+            if match:
+                layer_indices.add(int(match.group(1)))
+        return (max(layer_indices) + 1) if layer_indices else 0
+
+    def _select_bert_layers(self, source_layers, target_layers):
+        if target_layers >= source_layers:
+            return list(range(source_layers))
+
+        if self.opt.student_bert_layer_map == 'first':
+            return list(range(target_layers))
+        if self.opt.student_bert_layer_map == 'last':
+            start = source_layers - target_layers
+            return list(range(start, source_layers))
+
+        return [
+            int(round(idx * (source_layers - 1) / float(target_layers - 1)))
+            for idx in range(target_layers)
+        ] if target_layers > 1 else [source_layers - 1]
+
+    def _load_state_dict_shallow_bert_student(self, model, state_dict, model_label):
+        model_state = model.state_dict()
+        source_layers = self._bert_encoder_layer_count(state_dict)
+        target_layers = self._bert_encoder_layer_count(model_state)
+        layer_map = self._select_bert_layers(source_layers, target_layers)
+        loaded = []
+        skipped = []
+        pattern = re.compile(r'^(gcn_model\.gcn\.bert\.encoder\.layer\.)(\d+)(\..+)$')
+
+        for key, target_value in model_state.items():
+            source_key = key
+            match = pattern.match(key)
+            if match and source_layers and target_layers:
+                mapped_layer = layer_map[int(match.group(2))]
+                source_key = '{}{}{}'.format(match.group(1), mapped_layer, match.group(3))
+
+            source_value = state_dict.get(source_key)
+            if source_value is not None and target_value.shape == source_value.shape:
+                target_value.copy_(source_value)
+                loaded.append((key, source_key))
+            else:
+                skipped.append(key)
+
+        logger.info('{} shallow BERT layer map: {}'.format(model_label, layer_map))
+        logger.info('{} loaded keys: {}'.format(model_label, loaded))
+        if skipped:
+            logger.info('{} missing keys after shallow load: {}'.format(model_label, skipped))
+
     def _maybe_load_student_checkpoint(self):
         init_path = self.opt.student_init_path
         if not init_path:
@@ -250,7 +324,9 @@ class Instructor:
 
         logger.info('Loading student checkpoint: {}'.format(init_path))
         state_dict = torch.load(init_path, map_location=self.opt.device)
-        if self.opt.student_expand_init:
+        if self.opt.model_name == 'ssegcnbertshallow':
+            self._load_state_dict_shallow_bert_student(self.model, state_dict, 'student')
+        elif self.opt.student_expand_init:
             self._load_state_dict_expand_student(self.model, state_dict, 'student')
         else:
             self._load_state_dict_compat(self.model, state_dict, 'student')
@@ -261,6 +337,8 @@ class Instructor:
             return requested
         if teacher_path and 'ssegcnbertstudent' in os.path.basename(teacher_path):
             return 'ssegcnbertstudent'
+        if teacher_path and 'ssegcnbertshallow' in os.path.basename(teacher_path):
+            return 'ssegcnbertshallow'
         return 'ssegcnbert'
 
     def _resolve_aux_teacher_model_name(self, teacher_path):
@@ -269,6 +347,8 @@ class Instructor:
             return requested
         if teacher_path and 'ssegcnbertstudent' in os.path.basename(teacher_path):
             return 'ssegcnbertstudent'
+        if teacher_path and 'ssegcnbertshallow' in os.path.basename(teacher_path):
+            return 'ssegcnbertshallow'
         return 'ssegcnbert'
 
     def _build_teacher_from_path(self, teacher_path, teacher_model_name, label):
@@ -285,8 +365,13 @@ class Instructor:
                 teacher_opt.student_encoder_layers = self.opt.teacher_student_encoder_layers
             teacher = SSEGCNStudentClassifier(embedding_matrix, teacher_opt).to(self.opt.device)
             input_cols = INPUT_COLSES['ssegcn']
+        elif teacher_model_name == 'ssegcnbertshallow':
+            teacher_opt = copy.copy(self.opt)
+            bert = self._build_bert_backbone('ssegcnbertshallow')
+            teacher = SSEGCNBertStudentClassifier(bert, teacher_opt).to(self.opt.device)
+            input_cols = INPUT_COLSES['ssegcnbertshallow']
         else:
-            bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
+            bert = self._build_bert_backbone('ssegcnbert')
             teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
             input_cols = INPUT_COLSES['ssegcnbert']
 
@@ -294,6 +379,8 @@ class Instructor:
         state_dict = torch.load(teacher_path, map_location=self.opt.device)
         if teacher_model_name == 'ssegcnbertstudent':
             self._load_state_dict_compat(teacher, state_dict, label)
+        elif teacher_model_name == 'ssegcnbertshallow':
+            self._load_state_dict_shallow_bert_student(teacher, state_dict, label)
         else:
             teacher.load_state_dict(state_dict, strict=True)
         teacher.eval()
@@ -1139,7 +1226,7 @@ class Instructor:
         targets_all, outputs_all = None, None
         with torch.no_grad():
             for batch, sample_batched in enumerate(self.test_dataloader):
-                input_cols = self.student_input_cols if self.opt.model_name == 'ssegcnbertstudent' else self.opt.inputs_cols
+                input_cols = self.student_input_cols if self._is_kd_student_model(self.opt.model_name) else self.opt.inputs_cols
                 inputs = [sample_batched[col].to(self.opt.device) for col in input_cols]
                 targets = sample_batched['polarity'].to(self.opt.device)
                 outputs, penal = self.model(inputs)
@@ -1173,9 +1260,12 @@ class Instructor:
     
     def run(self):
         criterion = nn.CrossEntropyLoss()
-        if self.opt.model_name == 'ssegcnbertstudent':
+        if self._is_kd_student_model(self.opt.model_name):
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
-            optimizer = self.opt.optimizer(_params, lr=self.opt.student_lr, weight_decay=self.opt.l2reg)
+            if 'bert' in self.opt.model_name and self.opt.student_bert_use_adamw:
+                optimizer = self.get_bert_optimizer(self.model)
+            else:
+                optimizer = self.opt.optimizer(_params, lr=self.opt.student_lr, weight_decay=self.opt.l2reg)
         elif 'bert' not in self.opt.model_name:
             _params = filter(lambda p: p.requires_grad, self.model.parameters())
             optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
@@ -1184,8 +1274,8 @@ class Instructor:
         max_test_acc_overall = 0
         max_f1_overall = 0
         model_path = ''  # Initialize model_path
-        if self.opt.model_name == 'ssegcnbertstudent':
-            if not self.opt.student_init_path:
+        if self._is_kd_student_model(self.opt.model_name):
+            if not self.opt.student_init_path and 'bert' not in self.opt.model_name:
                 self._reset_params()
             max_test_acc, max_f1, model_path = self._train_kd(criterion, optimizer, max_test_acc_overall)
         elif 'bert' not in self.opt.model_name:
@@ -1209,6 +1299,7 @@ def main():
         'ssegcn': SSEGCNClassifier,
         'ssegcnbert': SSEGCNBertClassifier,
         'ssegcnbertstudent': SSEGCNStudentClassifier,
+        'ssegcnbertshallow': SSEGCNBertStudentClassifier,
 
     }
     
@@ -1294,9 +1385,9 @@ def main():
     parser.add_argument('--diff_lr', default=False, action='store_true')
     parser.add_argument('--bert_lr', default=2e-5, type=float)
     parser.add_argument('--teacher_path', default=None, type=str)
-    parser.add_argument('--teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
+    parser.add_argument('--teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent', 'ssegcnbertshallow'])
     parser.add_argument('--aux_teacher_path', default=None, type=str)
-    parser.add_argument('--aux_teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
+    parser.add_argument('--aux_teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent', 'ssegcnbertshallow'])
     parser.add_argument('--aux_teacher_logit_weight', default=0.0, type=float)
     parser.add_argument('--aux_teacher_blend_mode', default='fixed', type=str, choices=['fixed', 'confidence', 'disagreement', 'teacher_uncertainty'])
     parser.add_argument('--aux_teacher_blend_space', default='logits', type=str, choices=['logits', 'probs'])
@@ -1355,6 +1446,9 @@ def main():
     parser.add_argument('--student_init_path', default=None, type=str)
     parser.add_argument('--student_expand_init', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_expand_init_mode', default='overlap', type=str, choices=['overlap', 'zero_preserve'])
+    parser.add_argument('--student_bert_layers', default=6, type=int)
+    parser.add_argument('--student_bert_layer_map', default='uniform', type=str, choices=['uniform', 'first', 'last'])
+    parser.add_argument('--student_bert_use_adamw', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
