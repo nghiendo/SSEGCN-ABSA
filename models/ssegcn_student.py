@@ -72,6 +72,8 @@ class TinySSEGCNEncoder(nn.Module):
         x = torch.cat([word_emb, pos_emb, post_emb], dim=-1)
         x = self.input_dropout(x)
 
+        # Keep the LSTM weights contiguous to avoid repeated cuDNN repacking overhead.
+        self.encoder.flatten_parameters()
         packed = nn.utils.rnn.pack_padded_sequence(
             x, lengths.cpu(), batch_first=True, enforce_sorted=False
         )

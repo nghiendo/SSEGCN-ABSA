@@ -43,6 +43,21 @@ Experiments:
      - Selected checkpoint: `acc=0.6883`, `macro_f1=0.6286`
      - Best experiment so far
 
+5. `3a06886` `exp5: hidden-feature dkd with logit standardization`
+   - Script: `experiments/run_kd_laptop_hidden_dkd.sh`
+   - Config delta: switch to `--kd_logit_mode dkd`, `--kd_logit_standardize true`, and `--kd_feature_mode teacher_hidden`
+   - Result:
+     - Selected checkpoint: `acc=0.6614`, `macro_f1=0.5702`
+     - Conclusion: hidden-feature matching to the teacher encoder hurt this student.
+
+6. `TBD` `exp6: dist logit correlation distillation`
+   - Script: `experiments/run_kd_laptop_dist.sh`
+   - Config delta: replace KL logits KD with DIST-style inter/intra class correlation distillation
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.6551`, `macro_f1=0.5439`
+     - Conclusion: DIST alone is materially weaker than the exp4 recipe here.
+
 Current best experiment:
 - Commit: `8ebb68c`
 - Script: `experiments/run_kd_laptop_unfreeze_word_emb_lr5e4.sh`
