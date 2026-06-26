@@ -276,7 +276,49 @@ Experiments:
      - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6289`
      - Conclusion: reactivating primary-teacher weighting changes the optimization behavior as intended, but it still underperforms the simpler unweighted confidence-gated blend.
 
+34. `aae47ed` `exp34: add confidence dual-teacher best replay`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_best_replay_short.sh`
+   - Config delta: replay the original winning confidence-gated dual-teacher recipe, but start directly from the current best `0.6339` checkpoint
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6300`
+     - Conclusion: the old winning recipe does not reproduce its gain when started from the stronger checkpoint, so its earlier benefit was stage-specific.
+
+35. `b7d20a7` `exp35: add confidence dual-teacher aux025 short`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_aux025_short.sh`
+   - Config delta: keep the same replay setup as exp34 but reduce the auxiliary student-teacher logit weight from `0.4` to `0.25`
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6297`
+     - Conclusion: lowering the self-teacher contribution alone does not recover the lost F1 on top of the `0.6339` checkpoint.
+
+36. `ff8d8c3` `exp36: add confidence dual-teacher gentle polish`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
+   - Config delta: keep the confidence-gated dual-teacher family, but switch to a gentler one-epoch polish pass with lower LR, lower aux weight, and higher hard-label emphasis
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6851`, `macro_f1=0.6350`
+     - New best experiment so far
+     - Checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6851_f1_0.6350`
+     - Conclusion: a conservative polish pass finally improved on the previous best, suggesting the student now benefits more from checkpoint-preserving refinement than stronger teacher pull.
+
+37. `ee52e2f` `exp37: add minilm gentle polish distillation`
+   - Script: `experiments/run_kd_laptop_minilm_gentle_polish_short.sh`
+   - Config delta: start from the new best checkpoint, keep the gentle polish schedule, and add a very light MiniLM-style token relation loss
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6319`
+     - Conclusion: even a very light relation objective is still too disruptive once the gentle-polish checkpoint is already strong.
+
+38. `04dad33` `exp38: add confidence dual-teacher gentle polish replay`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_replay_short.sh`
+   - Config delta: replay the exp36 gentle-polish recipe directly from the new `0.6350` best checkpoint
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6316`
+     - Conclusion: the exp36 gain does not stack through an immediate second identical pass; it appears to be a narrow early improvement rather than a repeatable iterative climb.
+
 Current best experiment:
-- Commit: `d50d299`
-- Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6820_f1_0.6339`
+- Commit: `ff8d8c3`
+- Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6851_f1_0.6350`
