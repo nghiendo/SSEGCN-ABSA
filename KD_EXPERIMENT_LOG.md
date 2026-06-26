@@ -530,6 +530,15 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7302`
    - Conclusion: softening this local continuation does not improve on `exp61`; it matches the same best observed accuracy but loses macro F1, so the strongest branch remains the harder-label `exp61` checkpoint.
 
+63. `afaf02b` `exp63: probe shallow bert dkd last mile`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dkd_lastmile_short.sh`
+   - Config delta: continue from the `exp61` best checkpoint, replace plain KL logit KD with DKD (`kd_logit_mode=dkd`) while raising hard-label weight to `0.76`, reducing KD weight to `0.18`, and keeping a very light cosine token-hidden regularizer to test whether decoupled target/non-target supervision can recover the last accuracy gap
+   - Result:
+     - Best selected checkpoint before failure: `state_dict/ssegcnbertshallow_laptop_acc_0.7611_f1_0.7203`
+     - Best observed accuracy before failure: `acc=0.7611`
+     - Best observed macro F1 before failure: `macro_f1=0.7203`
+   - Conclusion: this local DKD continuation is materially worse than the `exp61` optimum even before completion; it also exposed an environment issue where `torch.save` failed because the root filesystem was full, so the run was stopped, cache space was reclaimed, and the strongest branch remains `exp61`.
+
 Current best experiment:
 - Commit: `9764e9f`
 - Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge2_short.sh`
