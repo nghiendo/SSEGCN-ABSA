@@ -342,6 +342,38 @@ class Instructor:
     def _weighted_mean(self, values, weights):
         return (values * weights).sum() / weights.sum().clamp_min(1e-12)
 
+    def _blend_teacher_logits(self, teacher_logits, aux_teacher_logits):
+        if aux_teacher_logits is None:
+            return teacher_logits
+
+        if self.opt.aux_teacher_blend_space == 'probs':
+            teacher_probs = F.softmax(teacher_logits / self.opt.kd_temperature, dim=-1)
+            aux_teacher_probs = F.softmax(aux_teacher_logits / self.opt.kd_temperature, dim=-1)
+        else:
+            teacher_probs = F.softmax(teacher_logits, dim=-1)
+            aux_teacher_probs = F.softmax(aux_teacher_logits, dim=-1)
+
+        aux_weight = teacher_probs.new_full(
+            (teacher_probs.size(0), 1),
+            float(self.opt.aux_teacher_logit_weight),
+        )
+
+        if self.opt.aux_teacher_blend_mode != 'fixed':
+            teacher_conf = teacher_probs.max(dim=-1, keepdim=True).values
+            aux_teacher_conf = aux_teacher_probs.max(dim=-1, keepdim=True).values
+            confidence_gate = torch.sigmoid(
+                (aux_teacher_conf - teacher_conf) / max(self.opt.aux_teacher_gate_temperature, 1e-6)
+            )
+
+            if self.opt.aux_teacher_blend_mode == 'confidence':
+                aux_weight = aux_weight * confidence_gate
+            else:
+                disagreement = (teacher_probs - aux_teacher_probs).abs().sum(dim=-1, keepdim=True) / 2.0
+                aux_weight = aux_weight * confidence_gate * disagreement
+
+        blended_probs = (1.0 - aux_weight) * teacher_probs + aux_weight * aux_teacher_probs
+        return torch.log(blended_probs.clamp_min(1e-12))
+
     def _standardize_logits(self, logits):
         mean = logits.mean(dim=-1, keepdim=True)
         std = logits.std(dim=-1, keepdim=True, unbiased=False).clamp_min(1e-6)
@@ -781,10 +813,7 @@ class Instructor:
                     teacher_features = self.teacher_model.encode(teacher_inputs)
                     if self.aux_teacher_model is not None:
                         aux_teacher_logits, _ = self.aux_teacher_model(aux_teacher_inputs)
-                        teacher_logits = (
-                            (1.0 - self.opt.aux_teacher_logit_weight) * teacher_logits
-                            + self.opt.aux_teacher_logit_weight * aux_teacher_logits
-                        )
+                        teacher_logits = self._blend_teacher_logits(teacher_logits, aux_teacher_logits)
 
                 if self.opt.kd_token_relation_weight > 0 or self.opt.kd_token_hidden_weight > 0:
                     student_lengths = sample_batched['length'].to(self.opt.device).long()
@@ -1100,6 +1129,9 @@ def main():
     parser.add_argument('--aux_teacher_path', default=None, type=str)
     parser.add_argument('--aux_teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
     parser.add_argument('--aux_teacher_logit_weight', default=0.0, type=float)
+    parser.add_argument('--aux_teacher_blend_mode', default='fixed', type=str, choices=['fixed', 'confidence', 'disagreement'])
+    parser.add_argument('--aux_teacher_blend_space', default='logits', type=str, choices=['logits', 'probs'])
+    parser.add_argument('--aux_teacher_gate_temperature', default=0.1, type=float)
     parser.add_argument('--teacher_feature_dim', default=100, type=int)
     parser.add_argument('--kd_temperature', default=4.0, type=float)
     parser.add_argument('--kd_temperature_schedule', default='constant', type=str, choices=['constant', 'linear', 'cosine'])
