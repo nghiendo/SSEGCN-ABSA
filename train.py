@@ -565,6 +565,35 @@ class Instructor:
         }
         return total_loss, components, sample_weights
 
+    def _epoch_progress(self, epoch_idx):
+        if self.opt.num_epoch <= 1:
+            return 1.0
+        return epoch_idx / float(self.opt.num_epoch - 1)
+
+    def _current_kd_temperature(self, epoch_idx):
+        if self.opt.kd_temperature_schedule == 'constant':
+            return self.opt.kd_temperature
+
+        progress = self._epoch_progress(epoch_idx)
+        start = self.opt.kd_temperature_start
+        end = self.opt.kd_temperature_end
+        if self.opt.kd_temperature_schedule == 'cosine':
+            ratio = 0.5 * (1.0 - np.cos(np.pi * progress))
+        else:
+            ratio = progress
+        return start + (end - start) * ratio
+
+    def _current_kd_scale(self, epoch_idx):
+        warmup_epochs = max(0, self.opt.kd_warmup_epochs)
+        if epoch_idx < warmup_epochs:
+            return 0.0
+
+        ramp_epochs = max(1, self.opt.kd_ramp_epochs)
+        progress = min(1.0, (epoch_idx - warmup_epochs + 1) / float(ramp_epochs))
+        if self.opt.kd_scale_schedule == 'cosine':
+            return 0.5 * (1.0 - np.cos(np.pi * progress))
+        return progress
+
     def _train_kd(self, criterion, optimizer, max_test_acc_overall=0):
         max_test_acc = 0
         max_f1 = 0
@@ -575,6 +604,16 @@ class Instructor:
         for epoch in range(self.opt.num_epoch):
             logger.info('>' * 60)
             logger.info('epoch: {}'.format(epoch))
+            kd_temperature = self._current_kd_temperature(epoch)
+            kd_scale = self._current_kd_scale(epoch)
+            hard_loss_weight = self.opt.kd_alpha + (1.0 - kd_scale) * (1.0 - self.opt.kd_alpha)
+            logger.info(
+                'kd curriculum: temp={:.4f}, kd_scale={:.4f}, hard_weight={:.4f}'.format(
+                    kd_temperature,
+                    kd_scale,
+                    hard_loss_weight,
+                )
+            )
             n_correct, n_total = 0, 0
             for i_batch, sample_batched in enumerate(self.train_dataloader):
                 global_step += 1
@@ -600,9 +639,9 @@ class Instructor:
                     teacher_logits,
                     teacher_features,
                     targets,
-                    self.opt.kd_temperature,
+                    kd_temperature,
                 )
-                loss = self.opt.kd_alpha * hard_loss + kd_loss
+                loss = hard_loss_weight * hard_loss + kd_scale * kd_loss
 
                 loss.backward()
                 optimizer.step()
@@ -629,13 +668,18 @@ class Instructor:
                         'loss: {:.4f}, hard: {:.4f}, kd_total: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
                             loss.item(),
                             hard_loss.item(),
-                            kd_loss.item(),
+                            (kd_scale * kd_loss).item(),
                             kd_components['kd_logit'].item(),
                             kd_components['kd_feature'].item(),
                             train_acc,
                             test_acc,
                             f1,
                         )
+                    )
+                    log_message += ', temp: {:.2f}, kd_scale: {:.2f}, hard_w: {:.2f}'.format(
+                        kd_temperature,
+                        kd_scale,
+                        hard_loss_weight,
                     )
                     if self.opt.kd_logit_mode == 'dkd':
                         log_message += ', tckd: {:.4f}, nckd: {:.4f}'.format(
@@ -879,9 +923,15 @@ def main():
     parser.add_argument('--teacher_path', default=None, type=str)
     parser.add_argument('--teacher_feature_dim', default=100, type=int)
     parser.add_argument('--kd_temperature', default=4.0, type=float)
+    parser.add_argument('--kd_temperature_schedule', default='constant', type=str, choices=['constant', 'linear', 'cosine'])
+    parser.add_argument('--kd_temperature_start', default=8.0, type=float)
+    parser.add_argument('--kd_temperature_end', default=4.0, type=float)
     parser.add_argument('--kd_alpha', default=0.4, type=float)
     parser.add_argument('--kd_beta', default=0.4, type=float)
     parser.add_argument('--kd_gamma', default=0.2, type=float)
+    parser.add_argument('--kd_warmup_epochs', default=0, type=int)
+    parser.add_argument('--kd_ramp_epochs', default=1, type=int)
+    parser.add_argument('--kd_scale_schedule', default='linear', type=str, choices=['linear', 'cosine'])
     parser.add_argument('--kd_logit_mode', default='kl', type=str, choices=['kl', 'dkd', 'dist'])
     parser.add_argument('--kd_logit_standardize', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--kd_dkd_target_weight', default=1.0, type=float)
