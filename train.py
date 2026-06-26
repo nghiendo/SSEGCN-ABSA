@@ -293,6 +293,8 @@ class Instructor:
     def _train_kd(self, criterion, optimizer, max_test_acc_overall=0):
         max_test_acc = 0
         max_f1 = 0
+        best_saved_acc = 0
+        best_saved_f1 = 0
         global_step = 0
         model_path = ''
         for epoch in range(self.opt.num_epoch):
@@ -338,14 +340,17 @@ class Instructor:
                     test_acc, f1 = self._evaluate()
                     if test_acc > max_test_acc:
                         max_test_acc = test_acc
+                    if f1 > max_f1:
+                        max_f1 = f1
+                    if (f1 > best_saved_f1) or (f1 == best_saved_f1 and test_acc > best_saved_acc):
+                        best_saved_acc = test_acc
+                        best_saved_f1 = f1
                         if test_acc > max_test_acc_overall:
                             os.makedirs('./state_dict', exist_ok=True)
                             model_path = './state_dict/{}_{}_acc_{:.4f}_f1_{:.4f}'.format(
                                 self.opt.model_name, self.opt.dataset, test_acc, f1)
                             self.best_model = copy.deepcopy(self.model)
                             logger.info('>> saved: {}'.format(model_path))
-                    if f1 > max_f1:
-                        max_f1 = f1
                     log_message = (
                         'loss: {:.4f}, hard: {:.4f}, kd_logit: {:.4f}, kd_feat: {:.4f}, acc: {:.4f}, test_acc: {:.4f}, f1: {:.4f}'.format(
                             loss.item(),
