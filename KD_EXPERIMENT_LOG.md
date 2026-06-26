@@ -539,7 +539,16 @@ Current best experiment:
      - Best observed macro F1 before failure: `macro_f1=0.7203`
    - Conclusion: this local DKD continuation is materially worse than the `exp61` optimum even before completion; it also exposed an environment issue where `torch.save` failed because the root filesystem was full, so the run was stopped, cache space was reclaimed, and the strongest branch remains `exp61`.
 
+64. `97b5e8e` `exp64: probe shallow bert dist last mile`
+   - Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
+   - Config delta: continue from the `exp61` best checkpoint, replace plain KL logit KD with DIST (`kd_logit_mode=dist`) to preserve inter-sample and intra-class correlation structure, keep hard-label pressure high (`kd_alpha=0.76`), reduce KD weight to `0.12`, and retain a very light cosine token-hidden regularizer
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7737_f1_0.7360`
+     - Best observed accuracy during training/final selection: `acc=0.7737`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7360`
+   - Conclusion: this relation-aware logit distillation unlocks a new regime; the shallow BERT student now surpasses the teacher on both headline metrics, beating teacher accuracy by `0.0015` and extending the macro-F1 lead to `0.0199`.
+
 Current best experiment:
-- Commit: `9764e9f`
-- Script: `experiments/run_kd_laptop_shallowbert6_hardlabel_edge2_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7706_f1_0.7317`
+- Commit: `97b5e8e`
+- Script: `experiments/run_kd_laptop_shallowbert6_dist_lastmile_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7737_f1_0.7360`
