@@ -678,27 +678,33 @@ class Instructor:
                 student_inputs = [sample_batched[col].to(self.opt.device) for col in self.student_input_cols]
                 teacher_inputs = [sample_batched[col].to(self.opt.device) for col in self.teacher_input_cols]
                 targets = sample_batched['polarity'].to(self.opt.device)
-                student_lengths = sample_batched['length'].to(self.opt.device).long()
-                teacher_tok2ori_map = sample_batched['tok2ori_map'].to(self.opt.device).long()
 
                 student_features = self.model.encode(student_inputs)
                 projected_features = self.model.project_for_distill(student_features)
                 student_logits = self.model.classifier(student_features)
-                student_token_states, _, _, _, _ = self.model.encode_tokens(student_inputs)
+                self.current_student_token_states = None
+                self.current_teacher_word_states = None
+                self.current_word_mask = None
 
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
                     teacher_features = self.teacher_model.encode(teacher_inputs)
-                    teacher_token_states = self.teacher_model.encode_tokens(teacher_inputs)
 
-                teacher_word_states, word_mask = self._aggregate_teacher_word_states(
-                    teacher_token_states,
-                    teacher_tok2ori_map,
-                    student_lengths,
-                )
-                self.current_student_token_states = student_token_states
-                self.current_teacher_word_states = teacher_word_states
-                self.current_word_mask = word_mask
+                if self.opt.kd_token_relation_weight > 0:
+                    student_lengths = sample_batched['length'].to(self.opt.device).long()
+                    teacher_tok2ori_map = sample_batched['tok2ori_map'].to(self.opt.device).long()
+                    student_token_states, _, _, _, _ = self.model.encode_tokens(student_inputs)
+                    with torch.no_grad():
+                        teacher_token_states = self.teacher_model.encode_tokens(teacher_inputs)
+
+                    teacher_word_states, word_mask = self._aggregate_teacher_word_states(
+                        teacher_token_states,
+                        teacher_tok2ori_map,
+                        student_lengths,
+                    )
+                    self.current_student_token_states = student_token_states
+                    self.current_teacher_word_states = teacher_word_states
+                    self.current_word_mask = word_mask
 
                 hard_loss = criterion(student_logits, targets)
                 kd_loss, kd_components, sample_weights = self._kd_loss(

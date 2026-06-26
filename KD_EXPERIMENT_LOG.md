@@ -98,7 +98,38 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.5332`, `macro_f1=0.2319`
      - Conclusion: prototype losses also hurt when applied from the first epoch on this student.
 
+12. `9b3572b` `exp12: add distilbert-style kd curriculum`
+   - Script: `experiments/run_kd_laptop_anneal_warmup.sh`
+   - Config delta: CE warmup from scratch, then linear KD ramp with temperature annealing
+   - Result:
+     - Early-stopped after clear underperformance
+     - Best observed checkpoint before stop: `acc=0.6060`, `macro_f1=0.4397`
+     - Conclusion: curriculum alone does not recover the ground lost by training this student from random init.
+
+13. `3d78ed2` `exp13: add tinybert-style stage2 distillation`
+   - Script: `experiments/run_kd_laptop_tinybert_stage2.sh`
+   - Config delta: warm-start from the best student checkpoint and run a short second-stage KD pass with lower LR and cosine feature alignment
+   - Result:
+     - Selected checkpoint: `acc=0.6883`, `macro_f1=0.6325`
+     - New best experiment so far
+
+14. `f776101` + `250ffc1` `exp14: add minilm-style word relation distillation`
+   - Script: `experiments/run_kd_laptop_minilm_stage2.sh`
+   - Config delta: warm-start from the current best student and add word-level token relation distillation by aggregating teacher subwords back to original words
+   - Result:
+     - Early-stopped after plateauing below the current best
+     - Best observed checkpoint before stop: `acc=0.6820`, `macro_f1=0.6231`
+     - Conclusion: relation KD is stable after warm-starting, but still weaker than the TinyBERT-style stage-2 pass.
+
+15. `c29b66c` `exp15: add mobilebert-style deeper bottleneck student`
+   - Script: `experiments/run_kd_laptop_mobilebert_style.sh`
+   - Config delta: use a thinner but deeper student with input bottleneck and two recurrent layers
+   - Result:
+     - Early-stopped after collapse from random initialization
+     - Best observed checkpoint before stop: `acc=0.3861`, `macro_f1=0.2333`
+     - Conclusion: the architecture change alone does not offset the optimization difficulty of a deeper student in this setup.
+
 Current best experiment:
-- Commit: `8ebb68c`
-- Script: `experiments/run_kd_laptop_unfreeze_word_emb_lr5e4.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6883_f1_0.6286`
+- Commit: `3d78ed2`
+- Script: `experiments/run_kd_laptop_tinybert_stage2.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6883_f1_0.6325`
