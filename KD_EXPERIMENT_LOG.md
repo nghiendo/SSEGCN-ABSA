@@ -12,6 +12,8 @@ Teacher setup used for all KD runs:
 Non-experiment prep commit:
 - `57bc686` `prep: allow random student embeddings without glove`
   - Purpose: enable student KD runs in this environment without downloading GloVe.
+- `e3be955` `prep: persist best checkpoints during training`
+  - Purpose: save each best-so-far checkpoint immediately so interrupted KD runs still leave a usable artifact in `state_dict/`.
 
 Experiments:
 
@@ -169,7 +171,32 @@ Experiments:
      - Best observed checkpoint before stop: `acc=0.6835`, `macro_f1=0.6280`
      - Conclusion: a fixed logits blend was stable but did not create extra headroom beyond the strongest single-teacher stage-2 recipe.
 
+21. `8d2be53` `exp21: add confidence-gated dual teacher distillation`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2.sh`
+   - Config delta: replace the fixed dual-teacher blend with a confidence-gated probability-space blend between the BERT teacher and the best student teacher
+   - Result:
+     - Early-stopped after confirming a small F1 improvement over the previous best
+     - Best observed checkpoint before stop: `acc=0.6820`, `macro_f1=0.6339`
+     - Caveat: this run happened before immediate checkpoint persistence, so the improved checkpoint was first verified from the training log and then reproduced in exp22
+     - Conclusion: adaptive dual-teacher KD finally nudged macro F1 above the TinyBERT-style stage-2 baseline.
+
+22. `d50d299` `exp22: add short confidence-gated dual teacher rerun`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
+   - Config delta: rerun the confidence-gated recipe for a single epoch so the early peak is retained, with immediate checkpoint persistence enabled
+   - Result:
+     - Selected checkpoint: `acc=0.6820`, `macro_f1=0.6339`
+     - New best experiment so far
+     - Checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6820_f1_0.6339`
+
+23. `2bef898` `exp23: add disagreement-gated dual teacher rerun`
+   - Script: `experiments/run_kd_laptop_dual_teacher_disagreement_stage2_short.sh`
+   - Config delta: continue from the new best checkpoint and switch the adaptive blend to disagreement-gated mixing
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6293`
+     - Conclusion: disagreement gating is weaker than confidence gating on top of the current best student.
+
 Current best experiment:
-- Commit: `3d78ed2`
-- Script: `experiments/run_kd_laptop_tinybert_stage2.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6883_f1_0.6325`
+- Commit: `d50d299`
+- Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6820_f1_0.6339`
