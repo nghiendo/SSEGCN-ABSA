@@ -196,7 +196,10 @@ class Instructor:
     def _build_teacher_from_path(self, teacher_path, teacher_model_name, label):
         if teacher_model_name == 'ssegcnbertstudent':
             _, embedding_matrix, _ = self._load_word_side_resources()
-            teacher = SSEGCNStudentClassifier(embedding_matrix, self.opt).to(self.opt.device)
+            teacher_opt = copy.copy(self.opt)
+            if self.opt.teacher_student_encoder_layers > 0:
+                teacher_opt.student_encoder_layers = self.opt.teacher_student_encoder_layers
+            teacher = SSEGCNStudentClassifier(embedding_matrix, teacher_opt).to(self.opt.device)
             input_cols = INPUT_COLSES['ssegcn']
         else:
             bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
@@ -1259,6 +1262,7 @@ def main():
     parser.add_argument('--student_encoder_layers', default=1, type=int)
     parser.add_argument('--student_recurrent_dropout', default=0.0, type=float)
     parser.add_argument('--student_bottleneck_dim', default=0, type=int)
+    parser.add_argument('--teacher_student_encoder_layers', default=-1, type=int)
     parser.add_argument('--student_lr', default=1e-3, type=float)
     parser.add_argument('--student_freeze_word_emb', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_init_path', default=None, type=str)
