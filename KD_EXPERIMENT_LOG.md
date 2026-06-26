@@ -446,3 +446,17 @@ Current best experiment:
 - Commit: `ff8d8c3`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_gentle_polish_short.sh`
 - Best selected checkpoint: `state_dict/ssegcnbertstudent_laptop_acc_0.6851_f1_0.6350`
+
+54. `8aa7b59` `exp54: add shallow bert kd student`
+   - Script: `experiments/run_kd_laptop_shallowbert6_uniform_short.sh`
+   - Config delta: add a new `ssegcnbertshallow` KD student that keeps the BERT+GCN ABSA head, truncates BERT to `6` layers, and initializes from the fine-tuned teacher by uniformly remapping teacher encoder layers `[0, 2, 4, 7, 9, 11]`
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7358_f1_0.6884`
+     - Best observed accuracy during training: `acc=0.7421`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.6884`
+   - Conclusion: this BERT-student pivot is materially stronger than the tiny word-side student (`0.6884` vs `0.6350` macro F1), so the new strongest line of work is shallow BERT distillation rather than continued polishing of `ssegcnbertstudent`.
+
+Current best experiment:
+- Commit: `8aa7b59`
+- Script: `experiments/run_kd_laptop_shallowbert6_uniform_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7358_f1_0.6884`
