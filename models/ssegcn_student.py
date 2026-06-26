@@ -38,14 +38,18 @@ class TinySSEGCNEncoder(nn.Module):
         self.post_emb = nn.Embedding(opt.post_size, opt.student_post_dim, padding_idx=0)
 
         input_dim = opt.embed_dim + opt.student_pos_dim + opt.student_post_dim
+        bottleneck_dim = opt.student_bottleneck_dim if opt.student_bottleneck_dim > 0 else input_dim
         self.input_dropout = nn.Dropout(opt.student_input_dropout)
+        self.input_proj = (
+            nn.Linear(input_dim, bottleneck_dim) if bottleneck_dim != input_dim else nn.Identity()
+        )
         self.encoder = nn.LSTM(
-            input_size=input_dim,
+            input_size=bottleneck_dim,
             hidden_size=opt.student_hidden_dim,
-            num_layers=1,
+            num_layers=opt.student_encoder_layers,
             batch_first=True,
             bidirectional=True,
-            dropout=0.0,
+            dropout=opt.student_recurrent_dropout if opt.student_encoder_layers > 1 else 0.0,
         )
         feature_dim = opt.student_hidden_dim * 2
         self.syntax_gate = nn.Linear(5, 1)
@@ -74,6 +78,7 @@ class TinySSEGCNEncoder(nn.Module):
         post_emb = self.post_emb(post)
         x = torch.cat([word_emb, pos_emb, post_emb], dim=-1)
         x = self.input_dropout(x)
+        x = self.input_proj(x)
 
         # Keep the LSTM weights contiguous to avoid repeated cuDNN repacking overhead.
         self.encoder.flatten_parameters()
