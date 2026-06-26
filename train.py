@@ -55,8 +55,10 @@ class Instructor:
         self.opt = opt
         self.best_model = None
         self.teacher_model = None
+        self.aux_teacher_model = None
         self.student_input_cols = None
         self.teacher_input_cols = None
+        self.aux_teacher_input_cols = None
 
         if opt.model_name == 'ssegcnbertstudent':
             self._build_student_kd_pipeline()
@@ -179,6 +181,35 @@ class Instructor:
             return 'ssegcnbertstudent'
         return 'ssegcnbert'
 
+    def _resolve_aux_teacher_model_name(self, teacher_path):
+        requested = self.opt.aux_teacher_model_name
+        if requested != 'auto':
+            return requested
+        if teacher_path and 'ssegcnbertstudent' in os.path.basename(teacher_path):
+            return 'ssegcnbertstudent'
+        return 'ssegcnbert'
+
+    def _build_teacher_from_path(self, teacher_path, teacher_model_name, label):
+        if teacher_model_name == 'ssegcnbertstudent':
+            _, embedding_matrix, _ = self._load_word_side_resources()
+            teacher = SSEGCNStudentClassifier(embedding_matrix, self.opt).to(self.opt.device)
+            input_cols = INPUT_COLSES['ssegcn']
+        else:
+            bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
+            teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
+            input_cols = INPUT_COLSES['ssegcnbert']
+
+        logger.info('Loading {} checkpoint: {}'.format(label, teacher_path))
+        state_dict = torch.load(teacher_path, map_location=self.opt.device)
+        if teacher_model_name == 'ssegcnbertstudent':
+            self._load_state_dict_compat(teacher, state_dict, label)
+        else:
+            teacher.load_state_dict(state_dict, strict=True)
+        teacher.eval()
+        for param in teacher.parameters():
+            param.requires_grad = False
+        return teacher, input_cols
+
     def _load_teacher_model(self):
         teacher_path = self.opt.teacher_path
         if not teacher_path or str(teacher_path).lower() in ('auto', 'latest'):
@@ -189,24 +220,22 @@ class Instructor:
             )
 
         teacher_model_name = self._resolve_teacher_model_name(teacher_path)
-        if teacher_model_name == 'ssegcnbertstudent':
-            _, embedding_matrix, _ = self._load_word_side_resources()
-            teacher = SSEGCNStudentClassifier(embedding_matrix, self.opt).to(self.opt.device)
-            self.teacher_input_cols = INPUT_COLSES['ssegcn']
-        else:
-            bert = BertModel.from_pretrained(self.opt.pretrained_bert_name)
-            teacher = SSEGCNBertClassifier(bert, self.opt).to(self.opt.device)
-            self.teacher_input_cols = INPUT_COLSES['ssegcnbert']
-        logger.info('Loading teacher checkpoint: {}'.format(teacher_path))
-        state_dict = torch.load(teacher_path, map_location=self.opt.device)
-        if teacher_model_name == 'ssegcnbertstudent':
-            self._load_state_dict_compat(teacher, state_dict, 'teacher')
-        else:
-            teacher.load_state_dict(state_dict, strict=True)
-        teacher.eval()
-        for param in teacher.parameters():
-            param.requires_grad = False
+        teacher, input_cols = self._build_teacher_from_path(teacher_path, teacher_model_name, 'teacher')
         self.teacher_model = teacher
+        self.teacher_input_cols = input_cols
+
+        aux_teacher_path = self.opt.aux_teacher_path
+        if not aux_teacher_path:
+            return
+
+        aux_teacher_model_name = self._resolve_aux_teacher_model_name(aux_teacher_path)
+        aux_teacher, aux_input_cols = self._build_teacher_from_path(
+            aux_teacher_path,
+            aux_teacher_model_name,
+            'aux_teacher',
+        )
+        self.aux_teacher_model = aux_teacher
+        self.aux_teacher_input_cols = aux_input_cols
 
     def _find_latest_teacher_checkpoint(self):
         pattern = os.path.join(
@@ -734,6 +763,9 @@ class Instructor:
 
                 student_inputs = [sample_batched[col].to(self.opt.device) for col in self.student_input_cols]
                 teacher_inputs = [sample_batched[col].to(self.opt.device) for col in self.teacher_input_cols]
+                aux_teacher_inputs = None
+                if self.aux_teacher_model is not None:
+                    aux_teacher_inputs = [sample_batched[col].to(self.opt.device) for col in self.aux_teacher_input_cols]
                 targets = sample_batched['polarity'].to(self.opt.device)
 
                 student_features = self.model.encode(student_inputs)
@@ -747,6 +779,12 @@ class Instructor:
                 with torch.no_grad():
                     teacher_logits, _ = self.teacher_model(teacher_inputs)
                     teacher_features = self.teacher_model.encode(teacher_inputs)
+                    if self.aux_teacher_model is not None:
+                        aux_teacher_logits, _ = self.aux_teacher_model(aux_teacher_inputs)
+                        teacher_logits = (
+                            (1.0 - self.opt.aux_teacher_logit_weight) * teacher_logits
+                            + self.opt.aux_teacher_logit_weight * aux_teacher_logits
+                        )
 
                 if self.opt.kd_token_relation_weight > 0 or self.opt.kd_token_hidden_weight > 0:
                     student_lengths = sample_batched['length'].to(self.opt.device).long()
@@ -1059,6 +1097,9 @@ def main():
     parser.add_argument('--bert_lr', default=2e-5, type=float)
     parser.add_argument('--teacher_path', default=None, type=str)
     parser.add_argument('--teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
+    parser.add_argument('--aux_teacher_path', default=None, type=str)
+    parser.add_argument('--aux_teacher_model_name', default='auto', type=str, choices=['auto', 'ssegcnbert', 'ssegcnbertstudent'])
+    parser.add_argument('--aux_teacher_logit_weight', default=0.0, type=float)
     parser.add_argument('--teacher_feature_dim', default=100, type=int)
     parser.add_argument('--kd_temperature', default=4.0, type=float)
     parser.add_argument('--kd_temperature_schedule', default='constant', type=str, choices=['constant', 'linear', 'cosine'])
