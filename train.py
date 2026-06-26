@@ -168,6 +168,78 @@ class Instructor:
         if missing:
             logger.info('{} missing keys after partial load: {}'.format(model_label, missing))
 
+    def _copy_overlap_(self, target, source):
+        slices = tuple(slice(0, min(t, s)) for t, s in zip(target.shape, source.shape))
+        target[slices].copy_(source[slices])
+
+    def _copy_lstm_expanded_(self, target, source, key):
+        if target.dim() == 1:
+            target_hidden = target.size(0) // 4
+            source_hidden = source.size(0) // 4
+            hidden_overlap = min(target_hidden, source_hidden)
+            for gate_idx in range(4):
+                target_start = gate_idx * target_hidden
+                source_start = gate_idx * source_hidden
+                target[target_start:target_start + hidden_overlap].copy_(
+                    source[source_start:source_start + hidden_overlap]
+                )
+            return
+
+        target_hidden = target.size(0) // 4
+        source_hidden = source.size(0) // 4
+        hidden_overlap = min(target_hidden, source_hidden)
+        if 'weight_hh' in key:
+            col_overlap = min(target.size(1), source.size(1), hidden_overlap)
+        else:
+            col_overlap = min(target.size(1), source.size(1))
+
+        for gate_idx in range(4):
+            target_start = gate_idx * target_hidden
+            source_start = gate_idx * source_hidden
+            target[target_start:target_start + hidden_overlap, :col_overlap].copy_(
+                source[source_start:source_start + hidden_overlap, :col_overlap]
+            )
+
+    def _load_state_dict_expand_student(self, model, state_dict, model_label):
+        model_state = model.state_dict()
+        loaded = []
+        skipped = []
+
+        for key, target_value in model_state.items():
+            source_value = state_dict.get(key)
+            if source_value is None:
+                skipped.append(key)
+                continue
+
+            if target_value.shape == source_value.shape:
+                target_value.copy_(source_value)
+                loaded.append(key)
+                continue
+
+            can_expand_lstm = (
+                key.startswith('encoder.encoder.')
+                and target_value.dim() in (1, 2)
+                and target_value.size(0) % 4 == 0
+                and source_value.dim() == target_value.dim()
+                and source_value.size(0) % 4 == 0
+            )
+
+            if can_expand_lstm:
+                self._copy_lstm_expanded_(target_value, source_value, key)
+                loaded.append(key)
+                continue
+
+            if target_value.dim() == source_value.dim():
+                self._copy_overlap_(target_value, source_value)
+                loaded.append(key)
+                continue
+
+            skipped.append(key)
+
+        logger.info('{} loaded expanded keys: {}'.format(model_label, loaded))
+        if skipped:
+            logger.info('{} skipped keys during expansion load: {}'.format(model_label, skipped))
+
     def _maybe_load_student_checkpoint(self):
         init_path = self.opt.student_init_path
         if not init_path:
@@ -175,7 +247,10 @@ class Instructor:
 
         logger.info('Loading student checkpoint: {}'.format(init_path))
         state_dict = torch.load(init_path, map_location=self.opt.device)
-        self._load_state_dict_compat(self.model, state_dict, 'student')
+        if self.opt.student_expand_init:
+            self._load_state_dict_expand_student(self.model, state_dict, 'student')
+        else:
+            self._load_state_dict_compat(self.model, state_dict, 'student')
 
     def _resolve_teacher_model_name(self, teacher_path):
         requested = self.opt.teacher_model_name
@@ -1266,6 +1341,7 @@ def main():
     parser.add_argument('--student_lr', default=1e-3, type=float)
     parser.add_argument('--student_freeze_word_emb', default=True, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     parser.add_argument('--student_init_path', default=None, type=str)
+    parser.add_argument('--student_expand_init', default=False, type=lambda x: str(x).lower() in ('1', 'true', 'yes', 'y'))
     opt = parser.parse_args()
     	
     opt.model_class = model_classes[opt.model_name]
