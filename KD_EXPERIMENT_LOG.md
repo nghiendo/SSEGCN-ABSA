@@ -456,7 +456,16 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.6884`
    - Conclusion: this BERT-student pivot is materially stronger than the tiny word-side student (`0.6884` vs `0.6350` macro F1), so the new strongest line of work is shallow BERT distillation rather than continued polishing of `ssegcnbertstudent`.
 
+55. `4216c4d` `exp55: tune shallow bert logit kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_last_logits_short.sh`
+   - Config delta: continue directly from the new shallow-BERT best checkpoint, drop feature KD (`kd_gamma=0.0`), raise logit KD pressure (`kd_beta=0.45`, `temperature=3.0`), lower the BERT LR slightly, and keep the 6-layer student focused on its own copied top stack rather than reinitializing from the 12-layer teacher
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7484_f1_0.7078`
+     - Best observed accuracy during training: `acc=0.7563`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7078`
+   - Conclusion: for the shallow BERT student, logit-only KD is much better than pooled feature matching at this stage, and the student is now very close to the teacher's macro F1 while already exceeding the teacher's accuracy.
+
 Current best experiment:
-- Commit: `8aa7b59`
-- Script: `experiments/run_kd_laptop_shallowbert6_uniform_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7358_f1_0.6884`
+- Commit: `4216c4d`
+- Script: `experiments/run_kd_laptop_shallowbert6_last_logits_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7484_f1_0.7078`
