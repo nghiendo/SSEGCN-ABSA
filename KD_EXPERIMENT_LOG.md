@@ -474,7 +474,25 @@ Current best experiment:
      - Best observed macro F1 during training/final selection: `macro_f1=0.7100`
    - Conclusion: light token-level distillation is helpful but only marginally so; it improves on the prior best (`0.7100` vs `0.7078`) and sets a new student peak, yet still remains just below the teacher's `0.7161` macro F1.
 
+57. `9e40ec3` `exp57: tune shallow bert hidden-only kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_hiddenonly_short.sh`
+   - Config delta: continue from the `exp56` best checkpoint, drop token-relation KD completely, keep only cosine token-hidden KD, reduce the BERT LR again, and slightly raise the token-hidden weight
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7595_f1_0.7153`
+     - Best observed accuracy during training/final selection: `acc=0.7595`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7153`
+   - Conclusion: relation KD had become net noise near the optimum; hidden-only token distillation is cleaner and pushes the student to within `0.0008` macro F1 of the teacher.
+
+58. `7a51aed` `exp58: polish shallow bert hidden-only kd`
+   - Script: `experiments/run_kd_laptop_shallowbert6_hiddenonly_polish_short.sh`
+   - Config delta: continue from the `exp57` best checkpoint, lower the BERT LR further for a gentle polish stage, and shift a bit more weight toward the hard target while keeping the same hidden-only token KD recipe
+   - Result:
+     - Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7658_f1_0.7260`
+     - Best observed accuracy during training/final selection: `acc=0.7658`
+     - Best observed macro F1 during training/final selection: `macro_f1=0.7260`
+   - Conclusion: this continuation finally surpasses the teacher on macro F1 (`0.7260` vs `0.7161`) while also lifting accuracy to `0.7658`; the shallow BERT student now beats the teacher on the primary F1 metric, though it still trails slightly on accuracy.
+
 Current best experiment:
-- Commit: `e1fa9b3`
-- Script: `experiments/run_kd_laptop_shallowbert6_tinybertlite_short.sh`
-- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7595_f1_0.7100`
+- Commit: `7a51aed`
+- Script: `experiments/run_kd_laptop_shallowbert6_hiddenonly_polish_short.sh`
+- Best selected checkpoint: `state_dict/ssegcnbertshallow_laptop_acc_0.7658_f1_0.7260`
