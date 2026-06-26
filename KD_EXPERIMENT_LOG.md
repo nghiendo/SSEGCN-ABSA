@@ -228,6 +228,54 @@ Experiments:
      - Best observed checkpoint: `acc=0.6835`, `macro_f1=0.6317`
      - Conclusion: warm-started DKD is much more stable than the earlier from-scratch DKD run, but still does not beat the confidence-gated dual-teacher checkpoint on macro F1.
 
+28. `454faa1` `exp28: add logits-only confidence dual teacher kd`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_logits_only_short.sh`
+   - Config delta: continue from the current best checkpoint, keep the confidence-gated dual-teacher logits blend, and remove explicit feature KD pressure by setting `kd_gamma=0.0`
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6320`
+     - Conclusion: logits-only refinement stays close to the best run, but the small feature-alignment term from the winning recipe still appears helpful.
+
+29. `959ea10` `exp29: add minilm dual-teacher short distillation`
+   - Script: `experiments/run_kd_laptop_minilm_dual_teacher_short.sh`
+   - Config delta: keep the confidence-gated dual-teacher recipe, drop direct feature KD, and add a very light MiniLM-style token relation loss
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6335`
+     - Conclusion: warm-started relation KD is now stable and nearly matches the best checkpoint, but it still misses the `0.6339` peak by a small margin.
+
+30. `814a878` `exp30: add standardized dual-teacher short distillation`
+   - Script: `experiments/run_kd_laptop_dual_teacher_standardized_short.sh`
+   - Config delta: keep the confidence-gated dual-teacher setup, add logit standardization, and retain only a light feature KD term
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6820`, `macro_f1=0.6239`
+     - Conclusion: standardizing logits removes useful scale information in this late-stage recipe and hurts macro F1 materially.
+
+31. `be2b08f` `exp31: add tinybert stage2 best short distillation`
+   - Script: `experiments/run_kd_laptop_tinybert_stage2_best_short.sh`
+   - Config delta: run a teacher-only TinyBERT/DistilBERT-style one-epoch stage-2 refinement from the current best checkpoint
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6804`, `macro_f1=0.6280`
+     - Conclusion: removing the auxiliary student teacher drops performance well below the best dual-teacher setup.
+
+32. `be5ddb1` `exp32: add tinybert stage2 best short no-weight distillation`
+   - Script: `experiments/run_kd_laptop_tinybert_stage2_best_short_noweight.sh`
+   - Config delta: repeat the teacher-only short stage-2 pass but disable per-instance KD weighting
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6268`
+     - Conclusion: turning off instance weighting does not rescue the teacher-only stage-2 refinement.
+
+33. `f0dfdbb` `exp33: add primary-teacher weighting for dual kd`
+   - Script: `experiments/run_kd_laptop_dual_teacher_confidence_primary_weight_short.sh`
+   - Config delta: keep the best confidence-gated dual-teacher recipe, but restore meaningful per-instance weights by computing them from the primary BERT teacher before auxiliary blending
+   - Result:
+     - Completed one short epoch and persisted the best checkpoint
+     - Best observed checkpoint: `acc=0.6788`, `macro_f1=0.6289`
+     - Conclusion: reactivating primary-teacher weighting changes the optimization behavior as intended, but it still underperforms the simpler unweighted confidence-gated blend.
+
 Current best experiment:
 - Commit: `d50d299`
 - Script: `experiments/run_kd_laptop_dual_teacher_confidence_stage2_short.sh`
