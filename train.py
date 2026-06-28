@@ -549,6 +549,15 @@ class Instructor:
     def _persist_best_model(self, model_path):
         if not model_path or self.best_model is None:
             return
+        # Delete any existing files for the same model and dataset to keep only the strongest one
+        pattern = os.path.join('./state_dict', '{}_{}_acc_*_f1_*'.format(self.opt.model_name, self.opt.dataset))
+        for old_file in glob.glob(pattern):
+            if os.path.abspath(old_file) != os.path.abspath(model_path):
+                try:
+                    os.remove(old_file)
+                    logger.info('>> removed older checkpoint: {}'.format(old_file))
+                except Exception as e:
+                    logger.warning('>> failed to remove {}: {}'.format(old_file, e))
         torch.save(self.best_model.state_dict(), model_path)
         logger.info('>> saved: {}'.format(model_path))
 
